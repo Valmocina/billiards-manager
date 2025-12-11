@@ -50,7 +50,6 @@ const App = () => {
 
   // --- SUPABASE FETCHING ---
   const fetchAllData = async () => {
-    // 1. Fetch Tables (Added start_time)
     const { data: tablesData } = await supabase.from('tables').select('*').order('id', { ascending: true });
     if (tablesData) {
       const formattedTables = tablesData.map(t => ({
@@ -60,12 +59,11 @@ const App = () => {
         sessionType: t.session_type,
         currentGuest: t.current_guest,
         isOpenTime: t.is_open_time,
-        startTime: t.start_time ? new Date(t.start_time) : null // Load start time
+        startTime: t.start_time ? new Date(t.start_time) : null
       }));
       setTables(formattedTables);
     }
 
-    // 2. Fetch Reservations
     const { data: resData } = await supabase.from('reservations').select('*').order('id', { ascending: false });
     if (resData) {
         const formattedRes = resData.map(r => ({
@@ -80,7 +78,6 @@ const App = () => {
         setReservations(formattedRes);
     }
 
-    // 3. Fetch History
     const { data: histData } = await supabase.from('history').select('*').order('id', { ascending: false });
     if (histData) {
         const formattedHist = histData.map(h => ({
@@ -91,7 +88,6 @@ const App = () => {
         setHistory(formattedHist);
     }
 
-    // 4. Fetch Settings
     const { data: settingsData } = await supabase.from('app_settings').select('*');
     if (settingsData) {
       settingsData.forEach(setting => {
@@ -111,6 +107,59 @@ const App = () => {
     const interval = setInterval(fetchAllData, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // --- AUTO-START RESERVATIONS LOGIC ---
+  useEffect(() => {
+    // Run this check every 5 seconds along with data fetch
+    const checkAutoStart = async () => {
+      const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+      const currentTimeVal = now.getHours() * 60 + now.getMinutes();
+
+      // Loop through reservations
+      for (const res of reservations) {
+        if (res.rawDate === todayStr) {
+          const [h, m] = res.rawTime.split(':').map(Number);
+          const resTimeVal = h * 60 + m;
+
+          // If reservation time has arrived (or passed within last 15 mins)
+          if (currentTimeVal >= resTimeVal && (currentTimeVal - resTimeVal) < 15) {
+            
+            // Find the table
+            const table = tables.find(t => t.name === res.tableName);
+            
+            // ONLY start if table is available
+            if (table && table.status === 'Available') {
+              console.log(`Auto-starting reservation for ${res.guestName}`);
+              
+              // 1. Update Table to Occupied
+              const sessionStartTime = new Date();
+              await supabase.from('tables').update({
+                status: 'Occupied',
+                occupied_until: 'Open Time',
+                occupied_until_raw: null,
+                session_type: 'walkin',
+                duration: 0,
+                is_open_time: true, // Auto-start as Open Time
+                current_guest: res.guestName,
+                deductible: RESERVATION_FEE,
+                start_time: sessionStartTime.toISOString()
+              }).eq('id', table.id);
+
+              // 2. Delete Reservation
+              await supabase.from('reservations').delete().eq('id', res.id);
+              
+              // 3. Refresh Data
+              fetchAllData();
+            }
+          }
+        }
+      }
+    };
+
+    const interval = setInterval(checkAutoStart, 5000);
+    return () => clearInterval(interval);
+  }, [reservations, tables]); // Dependencies ensure we have latest data
 
   // --- ACTIONS ---
   const handleLogin = (e) => {
@@ -251,41 +300,35 @@ const App = () => {
       date: new Date().toISOString().split('T')[0],
       time: '',
       duration: 1,
-      isOpenTime: true // <--- AUTO-SELECT OPEN TIME
+      isOpenTime: true // Auto-Select Open Time
     });
     setStartingReservationId(res.id); 
     setShowModal(true);
   };
 
-  // --- NEW: INTELLIGENT BILLING LOGIC ---
   const handleFinishSession = async (table) => {
     let cost = 0;
     
-    // Calculate precise duration if start time exists
     if (table.sessionType === 'walkin') {
        if (table.isOpenTime && table.startTime) {
           const now = new Date();
           const diffMs = now - table.startTime;
-          const diffMinutes = diffMs / (1000 * 60); // Convert to minutes
+          const diffMinutes = diffMs / (1000 * 60); 
 
-          // THE RULE: If <= 35 mins, charge half rate. Else charge hourly prorated.
           if (diffMinutes <= 35) {
             cost = hourlyRate / 2;
           } else {
             cost = (diffMinutes / 60) * hourlyRate;
           }
        } else {
-          // Fallback for fixed duration sessions
           cost = (table.duration || 1) * hourlyRate;
        }
     }
 
-    // Apply Deductible (Reservation Fee)
     if (table.deductible) {
       cost = Math.max(0, cost - table.deductible);
     }
     
-    // Round to nearest Peso
     cost = Math.round(cost);
 
     await supabase.from('tables').update({
@@ -297,7 +340,7 @@ const App = () => {
         duration: null,
         is_open_time: false,
         deductible: 0,
-        start_time: null // Clear start time
+        start_time: null 
     }).eq('id', table.id);
 
     await addToHistory({ tableName: table.name, type: 'Walk-In', guestName: table.currentGuest }, 'Completed', cost);
@@ -424,7 +467,6 @@ const App = () => {
       let occupiedUntilStr = '';
       let occupiedUntilRaw = null; 
 
-      // SAVE START TIME FOR BILLING
       const sessionStartTime = new Date();
 
       if (formData.isOpenTime) {
@@ -448,7 +490,7 @@ const App = () => {
         is_open_time: formData.isOpenTime,
         current_guest: formData.guestName,
         deductible: deductionAmount,
-        start_time: sessionStartTime.toISOString() // <--- SAVING START TIME
+        start_time: sessionStartTime.toISOString()
       }).eq('id', selectedTable.id);
       
       if (startingReservationId) {
@@ -1193,7 +1235,6 @@ const App = () => {
                       if (nextRes) {
                         const now = new Date();
                         const diffMs = nextRes.startObj - now;
-                        // NEW FEATURE: Automatic Notification
                         return (
                           <div className="mt-3 p-3 bg-[#75BDE0]/20 border border-[#75BDE0] rounded-xl text-xs text-[#0f172a]">
                             <p className="font-bold flex items-center gap-1"><Info className="w-3 h-3"/> Upcoming Reservation</p>
