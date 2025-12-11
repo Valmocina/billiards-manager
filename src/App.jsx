@@ -50,6 +50,7 @@ const App = () => {
 
   // --- SUPABASE FETCHING ---
   const fetchAllData = async () => {
+    // 1. Fetch Tables (Added start_time)
     const { data: tablesData } = await supabase.from('tables').select('*').order('id', { ascending: true });
     if (tablesData) {
       const formattedTables = tablesData.map(t => ({
@@ -58,11 +59,13 @@ const App = () => {
         occupiedUntil: t.occupied_until,
         sessionType: t.session_type,
         currentGuest: t.current_guest,
-        isOpenTime: t.is_open_time
+        isOpenTime: t.is_open_time,
+        startTime: t.start_time ? new Date(t.start_time) : null // Load start time
       }));
       setTables(formattedTables);
     }
 
+    // 2. Fetch Reservations
     const { data: resData } = await supabase.from('reservations').select('*').order('id', { ascending: false });
     if (resData) {
         const formattedRes = resData.map(r => ({
@@ -77,6 +80,7 @@ const App = () => {
         setReservations(formattedRes);
     }
 
+    // 3. Fetch History
     const { data: histData } = await supabase.from('history').select('*').order('id', { ascending: false });
     if (histData) {
         const formattedHist = histData.map(h => ({
@@ -87,6 +91,7 @@ const App = () => {
         setHistory(formattedHist);
     }
 
+    // 4. Fetch Settings
     const { data: settingsData } = await supabase.from('app_settings').select('*');
     if (settingsData) {
       settingsData.forEach(setting => {
@@ -246,26 +251,43 @@ const App = () => {
       date: new Date().toISOString().split('T')[0],
       time: '',
       duration: 1,
-      isOpenTime: false
+      isOpenTime: true // <--- AUTO-SELECT OPEN TIME
     });
     setStartingReservationId(res.id); 
     setShowModal(true);
   };
 
+  // --- NEW: INTELLIGENT BILLING LOGIC ---
   const handleFinishSession = async (table) => {
     let cost = 0;
+    
+    // Calculate precise duration if start time exists
     if (table.sessionType === 'walkin') {
-       if (table.isOpenTime) {
-          cost = hourlyRate; 
+       if (table.isOpenTime && table.startTime) {
+          const now = new Date();
+          const diffMs = now - table.startTime;
+          const diffMinutes = diffMs / (1000 * 60); // Convert to minutes
+
+          // THE RULE: If <= 35 mins, charge half rate. Else charge hourly prorated.
+          if (diffMinutes <= 35) {
+            cost = hourlyRate / 2;
+          } else {
+            cost = (diffMinutes / 60) * hourlyRate;
+          }
        } else {
+          // Fallback for fixed duration sessions
           cost = (table.duration || 1) * hourlyRate;
        }
     }
 
+    // Apply Deductible (Reservation Fee)
     if (table.deductible) {
       cost = Math.max(0, cost - table.deductible);
     }
     
+    // Round to nearest Peso
+    cost = Math.round(cost);
+
     await supabase.from('tables').update({
         status: 'Available',
         occupied_until: null,
@@ -274,7 +296,8 @@ const App = () => {
         current_guest: null,
         duration: null,
         is_open_time: false,
-        deductible: 0
+        deductible: 0,
+        start_time: null // Clear start time
     }).eq('id', table.id);
 
     await addToHistory({ tableName: table.name, type: 'Walk-In', guestName: table.currentGuest }, 'Completed', cost);
@@ -394,7 +417,6 @@ const App = () => {
       return;
     }
     
-    // --- WALK IN LOGIC ---
     if (modalType === 'walkin') {
       const conflictMsg = checkWalkInConflict(selectedTable, Number(formData.duration), formData.isOpenTime);
       if (conflictMsg) { setError(conflictMsg); return; }
@@ -402,12 +424,15 @@ const App = () => {
       let occupiedUntilStr = '';
       let occupiedUntilRaw = null; 
 
+      // SAVE START TIME FOR BILLING
+      const sessionStartTime = new Date();
+
       if (formData.isOpenTime) {
         const nextRes = getNextTodayReservation(selectedTable);
         occupiedUntilStr = nextRes ? convertTo12Hour(nextRes.rawTime) : 'Open Time';
         occupiedUntilRaw = nextRes ? nextRes.startObj : null; 
       } else {
-        const endTime = new Date(Date.now() + Number(formData.duration) * 60 * 60 * 1000);
+        const endTime = new Date(sessionStartTime.getTime() + Number(formData.duration) * 60 * 60 * 1000);
         occupiedUntilStr = endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         occupiedUntilRaw = endTime;
       }
@@ -422,7 +447,8 @@ const App = () => {
         duration: Number(formData.duration),
         is_open_time: formData.isOpenTime,
         current_guest: formData.guestName,
-        deductible: deductionAmount
+        deductible: deductionAmount,
+        start_time: sessionStartTime.toISOString() // <--- SAVING START TIME
       }).eq('id', selectedTable.id);
       
       if (startingReservationId) {
@@ -433,7 +459,6 @@ const App = () => {
       fetchAllData();
 
     } 
-    // --- NEW RESERVATION LOGIC (UPDATED 60 MIN GAP) ---
     else if (modalType === 'reserve') {
       if (!formData.date || !formData.time) { setError('Select date and time'); return; }
       const [h] = formData.time.split(':').map(Number);
@@ -465,7 +490,6 @@ const App = () => {
         if (r.tableName !== selectedTable.name || r.rawDate !== formData.date) return false;
         const existingResTime = new Date(`${r.rawDate}T${r.rawTime}`);
         const diffInMs = Math.abs(newResTime - existingResTime);
-        // CHANGED: 20 mins -> 60 mins gap requirement
         return (diffInMs / (1000 * 60)) < 60;
       });
 
