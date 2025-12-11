@@ -50,7 +50,6 @@ const App = () => {
 
   // --- SUPABASE FETCHING ---
   const fetchAllData = async () => {
-    // 1. Fetch Tables
     const { data: tablesData } = await supabase.from('tables').select('*').order('id', { ascending: true });
     if (tablesData) {
       const formattedTables = tablesData.map(t => ({
@@ -64,7 +63,6 @@ const App = () => {
       setTables(formattedTables);
     }
 
-    // 2. Fetch Reservations
     const { data: resData } = await supabase.from('reservations').select('*').order('id', { ascending: false });
     if (resData) {
         const formattedRes = resData.map(r => ({
@@ -79,7 +77,6 @@ const App = () => {
         setReservations(formattedRes);
     }
 
-    // 3. Fetch History
     const { data: histData } = await supabase.from('history').select('*').order('id', { ascending: false });
     if (histData) {
         const formattedHist = histData.map(h => ({
@@ -90,7 +87,6 @@ const App = () => {
         setHistory(formattedHist);
     }
 
-    // 4. Fetch App Settings
     const { data: settingsData } = await supabase.from('app_settings').select('*');
     if (settingsData) {
       settingsData.forEach(setting => {
@@ -170,7 +166,7 @@ const App = () => {
       .select();
 
     if (error) {
-      alert("Failed to update rate. Check console.");
+      alert("Failed to update rate.");
     } else {
       setHourlyRate(rate);
       alert("Hourly rate updated permanently!");
@@ -179,7 +175,6 @@ const App = () => {
 
   const handleClearHistory = async () => {
     if (window.confirm("CRITICAL WARNING: This will permanently delete ALL transaction history. This action cannot be undone. Are you sure?")) {
-      // Supabase delete all rows where ID > 0 (safe way to clear table)
       const { error } = await supabase.from('history').delete().gt('id', 0);
       if (error) {
         alert("Failed to clear history: " + error.message);
@@ -399,6 +394,7 @@ const App = () => {
       return;
     }
     
+    // --- WALK IN LOGIC ---
     if (modalType === 'walkin') {
       const conflictMsg = checkWalkInConflict(selectedTable, Number(formData.duration), formData.isOpenTime);
       if (conflictMsg) { setError(conflictMsg); return; }
@@ -437,6 +433,7 @@ const App = () => {
       fetchAllData();
 
     } 
+    // --- NEW RESERVATION LOGIC (UPDATED 60 MIN GAP) ---
     else if (modalType === 'reserve') {
       if (!formData.date || !formData.time) { setError('Select date and time'); return; }
       const [h] = formData.time.split(':').map(Number);
@@ -468,11 +465,12 @@ const App = () => {
         if (r.tableName !== selectedTable.name || r.rawDate !== formData.date) return false;
         const existingResTime = new Date(`${r.rawDate}T${r.rawTime}`);
         const diffInMs = Math.abs(newResTime - existingResTime);
-        return (diffInMs / (1000 * 60)) < 20;
+        // CHANGED: 20 mins -> 60 mins gap requirement
+        return (diffInMs / (1000 * 60)) < 60;
       });
 
       if (conflictReservation) {
-        setError(`Conflict! Too close to reservation at ${conflictReservation.displayTime}. Must be 20 mins apart.`);
+        setError(`Conflict! Too close to reservation at ${conflictReservation.displayTime}. Must be 1 hour apart.`);
         return;
       }
 
@@ -521,7 +519,6 @@ const App = () => {
     return history.reduce((sum, item) => item.status !== 'Canceled' ? sum + item.amount : sum, 0);
   }, [history]);
 
-  // Theme Config
   const theme = {
     bg: darkMode ? 'bg-[#0f172a]' : 'bg-[#f8fafc]',
     text: darkMode ? 'text-[#f1f5f9]' : 'text-[#0f172a]',
@@ -537,10 +534,7 @@ const App = () => {
   return (
     <div className={`flex h-screen font-sans overflow-hidden transition-colors duration-300 ${theme.bg} ${theme.text}`}>
       
-      {/* SIDEBAR (Hidden when printing) */}
       <aside className={`w-72 flex flex-col hidden md:flex ${theme.sidebar} relative shadow-xl print:hidden`}>
-        
-        {/* BRAND HEADER */}
         <div className="pt-10 pb-8 px-8 flex items-center gap-4">
           <h1 className="text-4xl font-black bg-gradient-to-r from-blue-300 to-pink-300 bg-clip-text text-transparent tracking-tighter">B&C</h1>
           <div className="w-[1px] h-10 bg-slate-500/50"></div>
@@ -621,7 +615,6 @@ const App = () => {
 
       <main className="flex-1 flex flex-col overflow-hidden">
         
-        {/* HEADER (Hidden when printing) */}
         <header className={`h-20 backdrop-blur-sm border-b flex items-center justify-between px-8 ${theme.header} print:hidden`}>
           <h2 className={`text-2xl font-bold ${theme.text}`}>
             {currentView === 'login' ? 'Authentication' : currentView.charAt(0).toUpperCase() + currentView.slice(1)}
@@ -643,7 +636,6 @@ const App = () => {
           
           {currentView === 'dashboard' && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 max-w-7xl mx-auto print:hidden">
-              
               <div className="xl:col-span-2 space-y-6">
                 <div className="text-center mb-8 xl:text-left xl:mb-0">
                   <p className={`${theme.textMuted} text-lg`}>Reserve your table for the perfect game</p>
@@ -863,7 +855,6 @@ const App = () => {
               </div>
 
               <div className={`${theme.card} rounded-3xl p-8 border print:border-none print:p-0 print:shadow-none`}>
-                {/* Header for Transactions with Print/Clear Controls */}
                 <div className="flex items-center justify-between mb-6 print:mb-4">
                   <h3 className={`text-xl font-bold ${theme.text}`}>Recent Transactions</h3>
                   <div className="flex items-center gap-4 print:hidden">
@@ -1173,13 +1164,21 @@ const App = () => {
                     )}
                   </div>
                   
-                  {modalType === 'walkin' && formData.isOpenTime && (() => {
+                  {modalType === 'walkin' && (() => {
                       const nextRes = getNextTodayReservation(selectedTable);
-                      if(nextRes) return (
-                        <div className="mt-3 p-3 bg-[#F8D49B]/20 border border-[#F8D49B] rounded-xl text-xs text-[#0f172a]">
-                          <span className="font-bold">Note:</span> Table reserved at {convertTo12Hour(nextRes.rawTime)}.
-                        </div>
-                      );
+                      if (nextRes) {
+                        const now = new Date();
+                        const diffMs = nextRes.startObj - now;
+                        // NEW FEATURE: Automatic Notification
+                        return (
+                          <div className="mt-3 p-3 bg-[#75BDE0]/20 border border-[#75BDE0] rounded-xl text-xs text-[#0f172a]">
+                            <p className="font-bold flex items-center gap-1"><Info className="w-3 h-3"/> Upcoming Reservation</p>
+                            <p>Next reservation is at <strong>{convertTo12Hour(nextRes.rawTime)}</strong>.</p>
+                            <p>You have <strong>{formatDuration(diffMs)}</strong> available to play.</p>
+                          </div>
+                        );
+                      }
+                      return null;
                    })()}
                 </div>
               )}
