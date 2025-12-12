@@ -678,7 +678,7 @@ const App = () => {
                 <div className="flex items-center justify-between mt-2">
                   <h3 className={`text-lg font-bold flex items-center gap-2 ${theme.text}`}>
                     <div className="w-1.5 h-6 bg-[#75BDE0] rounded-full"></div>
-                    Floor Plan
+                    Tables
                   </h3>
                   <span className={`text-sm ${theme.textMuted}`}>{tables.filter(t => t.status === 'Available').length} available</span>
                 </div>
