@@ -23,12 +23,12 @@ const App = () => {
   const [tables, setTables] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [history, setHistory] = useState([]); 
-  const [hourlyRate, setHourlyRate] = useState(200); 
+  const [hourlyRate, setHourlyRate] = useState(100); // Default to 100 based on new rates
   
   const [currentView, setCurrentView] = useState('dashboard'); 
   const [darkMode, setDarkMode] = useState(true);
   const [startingReservationId, setStartingReservationId] = useState(null);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // New state for mobile menu
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   // Modal & Form State
   const [showModal, setShowModal] = useState(false);
@@ -148,6 +148,40 @@ const App = () => {
     return () => clearInterval(interval);
   }, [reservations, tables]);
 
+  // --- PRICING LOGIC ---
+  const calculateSessionCost = (startTime) => {
+    if (!startTime) return 0;
+    
+    const now = new Date();
+    const diffMs = now - startTime;
+    // Calculate total minutes played, rounded up to next minute
+    const totalMinutes = Math.ceil(diffMs / (1000 * 60)); 
+    
+    const hours = Math.floor(totalMinutes / 60);
+    const remainder = totalMinutes % 60;
+    
+    let remainderCost = 0;
+    
+    // Exact lookup based on user provided rates
+    if (remainder > 0) {
+      if (remainder <= 5) remainderCost = 15;
+      else if (remainder <= 10) remainderCost = 20;
+      else if (remainder <= 15) remainderCost = 25;
+      else if (remainder <= 20) remainderCost = 30;
+      else if (remainder <= 25) remainderCost = 40;
+      else if (remainder <= 30) remainderCost = 50;
+      else if (remainder <= 35) remainderCost = 60;
+      else if (remainder <= 40) remainderCost = 70;
+      else if (remainder <= 45) remainderCost = 75;
+      else if (remainder <= 50) remainderCost = 80;
+      else if (remainder <= 55) remainderCost = 90;
+      else remainderCost = 100; // 56-60 mins
+    }
+
+    // Total cost = (Hours * 100) + Remainder Cost
+    return (hours * 100) + remainderCost;
+  };
+
   // --- ACTIONS ---
   const handleLogin = (e) => {
     e.preventDefault();
@@ -167,7 +201,6 @@ const App = () => {
     setIsMobileMenuOpen(false);
   };
 
-  // Helper to close mobile menu when clicking a nav item
   const handleNavClick = (view) => {
     setCurrentView(view);
     setIsMobileMenuOpen(false);
@@ -305,16 +338,10 @@ const App = () => {
     
     if (table.sessionType === 'walkin') {
        if (table.isOpenTime && table.startTime) {
-         const now = new Date();
-         const diffMs = now - table.startTime;
-         const diffMinutes = diffMs / (1000 * 60); 
-
-         if (diffMinutes <= 35) {
-           cost = hourlyRate / 2;
-         } else {
-           cost = (diffMinutes / 60) * hourlyRate;
-         }
+         // Use the new pricing logic for Open Time
+         cost = calculateSessionCost(table.startTime);
        } else {
+         // Fallback for fixed duration (optional: could apply same logic if needed)
          cost = (table.duration || 1) * hourlyRate;
        }
     }
