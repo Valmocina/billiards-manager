@@ -12,7 +12,7 @@ import {
 
 const App = () => {
   // --- CONSTANTS ---
-  const RESERVATION_FEE = 50;
+  const RESERVATION_FEE = 15; // UPDATED to 15
   const WAITLIST_LIMIT = 10;
 
   // --- AUTH STATE ---
@@ -29,7 +29,10 @@ const App = () => {
   
   const [currentView, setCurrentView] = useState('dashboard'); 
   const [darkMode, setDarkMode] = useState(true);
+  
+  // Track reservation start details
   const [startingReservationId, setStartingReservationId] = useState(null); 
+  const [startingReservationType, setStartingReservationType] = useState(null); // New state to track if it's Waitlist or Reservation
   
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [now, setNow] = useState(new Date()); 
@@ -37,7 +40,7 @@ const App = () => {
   // Modal & Form State
   const [showModal, setShowModal] = useState(false);
   const [selectedTable, setSelectedTable] = useState(null);
-  const [modalType, setModalType] = useState(null); // 'walkin', 'reserve' (scheduled), 'waitlist' (queue), 'edit'
+  const [modalType, setModalType] = useState(null); 
   const [formData, setFormData] = useState({
     guestName: '',
     date: new Date().toISOString().split('T')[0],
@@ -70,7 +73,7 @@ const App = () => {
       setTables(formattedTables);
     }
 
-    const { data: resData } = await supabase.from('reservations').select('*').order('id', { ascending: true }); // Order by creation/time
+    const { data: resData } = await supabase.from('reservations').select('*').order('id', { ascending: true });
     if (resData) {
         const formattedRes = resData.map(r => ({
             ...r,
@@ -237,6 +240,7 @@ const App = () => {
     });
     setError('');
     setStartingReservationId(null);
+    setStartingReservationType(null);
   };
 
   const addToHistory = async (item, status, amount = 0) => {
@@ -306,6 +310,7 @@ const App = () => {
       preferredTable: res.tableName
     });
     setStartingReservationId(res.id); 
+    setStartingReservationType(res.type); // Track if it was Waitlist or Reservation
     setShowModal(true);
   };
 
@@ -432,7 +437,8 @@ const App = () => {
         occupiedUntilRaw = endTime;
       }
 
-      const deductionAmount = startingReservationId ? RESERVATION_FEE : 0;
+      // Logic: Only deduct fee if it was a SCHEDULED RESERVATION. Waitlist has no deposit.
+      const deductionAmount = (startingReservationId && startingReservationType === 'Reservation') ? RESERVATION_FEE : 0;
       
       await supabase.from('tables').update({
         status: 'Occupied',
@@ -469,7 +475,7 @@ const App = () => {
         display_date: 'Today',
         display_time: 'Waiting',
         type: 'Waitlist',
-        amount: RESERVATION_FEE
+        amount: 0 // NO DEPOSIT FOR WAITLIST
       };
       
       await supabase.from('reservations').insert([newWaitlist]);
@@ -506,6 +512,7 @@ const App = () => {
     setModalType(null);
     setError('');
     setStartingReservationId(null);
+    setStartingReservationType(null);
   };
 
   const totalEarnings = useMemo(() => {
@@ -1160,7 +1167,7 @@ const App = () => {
                             <option key={t.id} value={t.name}>{t.name}</option>
                         ))}
                      </select>
-                     <p className="text-[10px] text-slate-500 mt-1 italic">* Note: Table preparation may take 5 minutes.</p>
+                     <p className="text-[10px] text-red-500 font-bold mt-1 italic">* Note: Table preparation may take 5 minutes.</p>
                   </div>
               )}
 
@@ -1222,7 +1229,8 @@ const App = () => {
                          <span>30 mins: ₱50</span>
                          <span>1 hr: ₱100</span>
                     </div>
-                    {startingReservationId && (
+                    {/* Only show deposit deduction if it was a SCHEDULED RESERVATION */}
+                    {(startingReservationId && startingReservationType === 'Reservation') && (
                       <div className="mt-2 text-green-600 bg-green-100 px-2 py-1 rounded w-fit">
                         -₱{RESERVATION_FEE} (Deposit)
                       </div>
