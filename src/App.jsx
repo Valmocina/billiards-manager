@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Armchair, Settings, LogOut, 
   Search, Bell, Moon, Sun, Monitor, DollarSign,
   CheckCircle, History, TrendingUp, Receipt, Play,
-  Lock, Key, LogIn, Tag, Printer
+  Lock, Key, LogIn, Tag, Printer, Menu
 } from 'lucide-react';
 
 const App = () => {
@@ -27,7 +27,8 @@ const App = () => {
   
   const [currentView, setCurrentView] = useState('dashboard'); 
   const [darkMode, setDarkMode] = useState(true);
-  const [startingReservationId, setStartingReservationId] = useState(null); 
+  const [startingReservationId, setStartingReservationId] = useState(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // New state for mobile menu
   
   // Modal & Form State
   const [showModal, setShowModal] = useState(false);
@@ -110,29 +111,19 @@ const App = () => {
 
   // --- AUTO-START RESERVATIONS LOGIC ---
   useEffect(() => {
-    // Run this check every 5 seconds along with data fetch
     const checkAutoStart = async () => {
       const now = new Date();
       const todayStr = now.toISOString().split('T')[0];
       const currentTimeVal = now.getHours() * 60 + now.getMinutes();
 
-      // Loop through reservations
       for (const res of reservations) {
         if (res.rawDate === todayStr) {
           const [h, m] = res.rawTime.split(':').map(Number);
           const resTimeVal = h * 60 + m;
 
-          // If reservation time has arrived (or passed within last 15 mins)
           if (currentTimeVal >= resTimeVal && (currentTimeVal - resTimeVal) < 15) {
-            
-            // Find the table
             const table = tables.find(t => t.name === res.tableName);
-            
-            // ONLY start if table is available
             if (table && table.status === 'Available') {
-              console.log(`Auto-starting reservation for ${res.guestName}`);
-              
-              // 1. Update Table to Occupied
               const sessionStartTime = new Date();
               await supabase.from('tables').update({
                 status: 'Occupied',
@@ -140,26 +131,22 @@ const App = () => {
                 occupied_until_raw: null,
                 session_type: 'walkin',
                 duration: 0,
-                is_open_time: true, // Auto-start as Open Time
+                is_open_time: true,
                 current_guest: res.guestName,
                 deductible: RESERVATION_FEE,
                 start_time: sessionStartTime.toISOString()
               }).eq('id', table.id);
 
-              // 2. Delete Reservation
               await supabase.from('reservations').delete().eq('id', res.id);
-              
-              // 3. Refresh Data
               fetchAllData();
             }
           }
         }
       }
     };
-
     const interval = setInterval(checkAutoStart, 5000);
     return () => clearInterval(interval);
-  }, [reservations, tables]); // Dependencies ensure we have latest data
+  }, [reservations, tables]);
 
   // --- ACTIONS ---
   const handleLogin = (e) => {
@@ -177,7 +164,14 @@ const App = () => {
     setIsAuthenticated(false);
     setLoginInput({ username: '', password: '' });
     setCurrentView('dashboard');
+    setIsMobileMenuOpen(false);
   };
+
+  // Helper to close mobile menu when clicking a nav item
+  const handleNavClick = (view) => {
+    setCurrentView(view);
+    setIsMobileMenuOpen(false);
+  }
 
   const handleChangePassword = async () => {
     if (passwordForm.current !== adminCredentials.password) {
@@ -300,7 +294,7 @@ const App = () => {
       date: new Date().toISOString().split('T')[0],
       time: '',
       duration: 1,
-      isOpenTime: true // Auto-Select Open Time
+      isOpenTime: true 
     });
     setStartingReservationId(res.id); 
     setShowModal(true);
@@ -598,7 +592,22 @@ const App = () => {
   return (
     <div className={`flex h-screen font-sans overflow-hidden transition-colors duration-300 ${theme.bg} ${theme.text}`}>
       
-      <aside className={`w-72 flex flex-col hidden md:flex ${theme.sidebar} relative shadow-xl print:hidden`}>
+      {/* --- MOBILE OVERLAY --- */}
+      {isMobileMenuOpen && (
+        <div 
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+        />
+      )}
+
+      {/* --- SIDEBAR --- */}
+      <aside className={`
+        fixed inset-y-0 left-0 z-50 w-72 flex flex-col 
+        transform transition-transform duration-300 ease-in-out
+        md:relative md:translate-x-0
+        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+        ${theme.sidebar} shadow-xl print:hidden
+      `}>
         <div className="pt-10 pb-8 px-8 flex items-center gap-4">
           <h1 className="text-4xl font-black bg-gradient-to-r from-blue-300 to-pink-300 bg-clip-text text-transparent tracking-tighter">B&C</h1>
           <div className="w-[1px] h-10 bg-slate-500/50"></div>
@@ -610,7 +619,7 @@ const App = () => {
 
         <nav className="flex-1 px-6 space-y-3 mt-4">
           <button 
-            onClick={() => setCurrentView('dashboard')}
+            onClick={() => handleNavClick('dashboard')}
             className={`w-full flex items-center gap-4 px-6 py-4 rounded-xl transition-all font-bold text-base shadow-lg ${
               currentView === 'dashboard' 
                 ? 'bg-[#7dd3fc] text-[#0f172a] hover:bg-[#38bdf8]' 
@@ -623,7 +632,7 @@ const App = () => {
           {isAuthenticated && (
             <>
               <button 
-                onClick={() => setCurrentView('management')}
+                onClick={() => handleNavClick('management')}
                 className={`w-full flex items-center gap-4 px-6 py-4 rounded-xl transition-all font-bold text-base ${
                   currentView === 'management' 
                     ? 'bg-[#F8D49B] text-[#0f172a] shadow-lg' 
@@ -634,7 +643,7 @@ const App = () => {
               </button>
 
               <button 
-                onClick={() => setCurrentView('earnings')}
+                onClick={() => handleNavClick('earnings')}
                 className={`w-full flex items-center gap-4 px-6 py-4 rounded-xl transition-all font-bold text-base ${
                   currentView === 'earnings' 
                     ? 'bg-[#F89B9B] text-[#0f172a] shadow-lg' 
@@ -645,7 +654,7 @@ const App = () => {
               </button>
 
               <button 
-                onClick={() => setCurrentView('settings')}
+                onClick={() => handleNavClick('settings')}
                 className={`w-full flex items-center gap-4 px-6 py-4 rounded-xl transition-all font-bold text-base ${
                   currentView === 'settings' 
                     ? 'bg-[#cbd5e1] text-[#0f172a] shadow-lg' 
@@ -668,7 +677,7 @@ const App = () => {
             </button>
           ) : (
             <button 
-              onClick={() => setCurrentView('login')}
+              onClick={() => { setCurrentView('login'); setIsMobileMenuOpen(false); }}
               className="flex items-center gap-3 text-sky-400 hover:text-sky-300 font-medium transition-colors group"
             >
               <LogIn className="w-5 h-5 group-hover:translate-x-1 transition-transform" /> Admin Login
@@ -677,12 +686,23 @@ const App = () => {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden relative w-full">
         
-        <header className={`h-20 backdrop-blur-sm border-b flex items-center justify-between px-8 ${theme.header} print:hidden`}>
-          <h2 className={`text-2xl font-bold ${theme.text}`}>
-            {currentView === 'login' ? 'Authentication' : currentView.charAt(0).toUpperCase() + currentView.slice(1)}
-          </h2>
+        {/* --- HEADER --- */}
+        <header className={`h-16 md:h-20 backdrop-blur-sm border-b flex items-center justify-between px-4 md:px-8 ${theme.header} print:hidden`}>
+          <div className="flex items-center gap-3">
+            {/* Mobile Menu Button */}
+            <button 
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="p-2 md:hidden rounded-lg hover:bg-black/10 transition-colors"
+            >
+              <Menu className={`w-6 h-6 ${theme.text}`} />
+            </button>
+            
+            <h2 className={`text-xl md:text-2xl font-bold ${theme.text}`}>
+              {currentView === 'login' ? 'Authentication' : currentView.charAt(0).toUpperCase() + currentView.slice(1)}
+            </h2>
+          </div>
           
           <div className="flex items-center gap-6">
             <div className="relative hidden sm:block">
@@ -690,22 +710,23 @@ const App = () => {
               <input 
                 type="text" 
                 placeholder="Search..." 
-                className={`${theme.input} text-sm rounded-full pl-10 pr-4 py-2 focus:outline-none focus:border-[#75BDE0] w-64 transition-colors`}
+                className={`${theme.input} text-sm rounded-full pl-10 pr-4 py-2 focus:outline-none focus:border-[#75BDE0] w-48 md:w-64 transition-colors`}
               />
             </div>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-8 print:p-0">
+        {/* --- MAIN CONTENT AREA --- */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 print:p-0">
           
           {currentView === 'dashboard' && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 max-w-7xl mx-auto print:hidden">
               <div className="xl:col-span-2 space-y-6">
-                <div className="text-center mb-8 xl:text-left xl:mb-0">
+                <div className="text-center mb-6 xl:text-left xl:mb-0">
                   <p className={`${theme.textMuted} text-lg`}>Reserve your table for the perfect game</p>
                 </div>
 
-                <div className="flex items-center justify-between mt-8">
+                <div className="flex items-center justify-between mt-4 md:mt-8">
                   <h3 className={`text-lg font-bold flex items-center gap-2 ${theme.text}`}>
                     <div className="w-1.5 h-6 bg-[#75BDE0] rounded-full"></div>
                     Available Tables
@@ -713,7 +734,7 @@ const App = () => {
                   <span className={`text-sm ${theme.textMuted}`}>{tables.filter(t => t.status === 'Available').length} available now</span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
                   {tables.map(table => (
                     <div key={table.id} className={`${theme.card} rounded-2xl p-5 shadow-sm hover:shadow-lg transition-all duration-300 group relative overflow-hidden border`}>
                       <div className="flex justify-between items-start mb-4">
@@ -918,24 +939,24 @@ const App = () => {
                 </div>
               </div>
 
-              <div className={`${theme.card} rounded-3xl p-8 border print:border-none print:p-0 print:shadow-none`}>
+              <div className={`${theme.card} rounded-3xl p-4 md:p-8 border print:border-none print:p-0 print:shadow-none`}>
                 <div className="flex items-center justify-between mb-6 print:mb-4">
                   <h3 className={`text-xl font-bold ${theme.text}`}>Recent Transactions</h3>
                   <div className="flex items-center gap-4 print:hidden">
-                    <div className="text-red-400 text-xs font-bold flex items-center gap-1 bg-red-500/10 px-2 py-1 rounded">
+                    <div className="hidden md:flex text-red-400 text-xs font-bold items-center gap-1 bg-red-500/10 px-2 py-1 rounded">
                       <AlertCircle className="w-3 h-3" /> Warning: Deletion is permanent
                     </div>
                     <button 
                       onClick={handleClearHistory} 
                       className="flex items-center gap-2 px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-bold transition-colors"
                     >
-                      <Trash2 className="w-4 h-4" /> Clear All
+                      <Trash2 className="w-4 h-4" /> <span className="hidden md:inline">Clear All</span>
                     </button>
                     <button 
                       onClick={handlePrint}
                       className="flex items-center gap-2 px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-bold transition-colors"
                     >
-                      <Printer className="w-4 h-4" /> Print
+                      <Printer className="w-4 h-4" /> <span className="hidden md:inline">Print</span>
                     </button>
                   </div>
                 </div>
@@ -944,11 +965,11 @@ const App = () => {
                   <table className="w-full text-left">
                     <thead className={`${theme.tableHeader} border-b ${darkMode ? 'border-[#334155]' : 'border-slate-200'}`}>
                       <tr>
-                        <th className="pb-4 pl-4">Type</th>
-                        <th className="pb-4">Guest</th>
-                        <th className="pb-4">Details</th>
-                        <th className="pb-4">Status</th>
-                        <th className="pb-4 pr-4 text-right">Amount</th>
+                        <th className="pb-4 pl-4 whitespace-nowrap">Type</th>
+                        <th className="pb-4 whitespace-nowrap">Guest</th>
+                        <th className="pb-4 whitespace-nowrap">Details</th>
+                        <th className="pb-4 whitespace-nowrap">Status</th>
+                        <th className="pb-4 pr-4 text-right whitespace-nowrap">Amount</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-700/20">
@@ -961,8 +982,8 @@ const App = () => {
                               {item.type}
                             </span>
                           </td>
-                          <td className={`py-4 ${theme.text}`}>{item.guestName}</td>
-                          <td className={`py-4 ${theme.textMuted}`}>{item.tableName} • {item.date}</td>
+                          <td className={`py-4 ${theme.text} whitespace-nowrap`}>{item.guestName}</td>
+                          <td className={`py-4 ${theme.textMuted} whitespace-nowrap`}>{item.tableName} • {item.date}</td>
                           <td className="py-4">
                             <span className={`text-xs font-bold ${
                               item.status === 'Completed' ? 'text-emerald-400' : 
@@ -982,10 +1003,10 @@ const App = () => {
           )}
 
           {currentView === 'management' && isAuthenticated && (
-            <div className={`max-w-4xl mx-auto rounded-3xl p-8 border ${theme.card}`}>
-              <div className="flex items-center justify-between mb-8">
+            <div className={`max-w-4xl mx-auto rounded-3xl p-4 md:p-8 border ${theme.card}`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
                 <h3 className={`text-2xl font-bold ${theme.text}`}>Table Management</h3>
-                <button onClick={() => setCurrentView('dashboard')} className="text-[#75BDE0] hover:underline">Back to Dashboard</button>
+                <button onClick={() => setCurrentView('dashboard')} className="text-[#75BDE0] hover:underline self-start md:self-auto">Back to Dashboard</button>
               </div>
               
               <div className={`p-6 rounded-2xl border mb-8 ${theme.subCard}`}>
@@ -996,9 +1017,9 @@ const App = () => {
                     value={newTableName}
                     onChange={(e) => setNewTableName(e.target.value)}
                     placeholder="Enter table name"
-                    className={`flex-1 rounded-xl px-4 focus:border-[#75BDE0] outline-none ${theme.input}`}
+                    className={`flex-1 rounded-xl px-4 focus:border-[#75BDE0] outline-none ${theme.input} min-w-0`}
                   />
-                  <button onClick={handleAddTable} className="bg-[#75BDE0] hover:bg-[#64a9cc] text-[#0f172a] font-bold px-6 rounded-xl transition-colors">Add</button>
+                  <button onClick={handleAddTable} className="bg-[#75BDE0] hover:bg-[#64a9cc] text-[#0f172a] font-bold px-6 rounded-xl transition-colors whitespace-nowrap">Add</button>
                 </div>
               </div>
 
@@ -1017,10 +1038,10 @@ const App = () => {
           )}
 
           {currentView === 'settings' && isAuthenticated && (
-            <div className={`max-w-4xl mx-auto rounded-3xl p-8 border ${theme.card}`}>
-              <div className="flex items-center justify-between mb-8">
+            <div className={`max-w-4xl mx-auto rounded-3xl p-4 md:p-8 border ${theme.card}`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
                 <h3 className={`text-2xl font-bold ${theme.text}`}>System Settings</h3>
-                <button onClick={() => setCurrentView('dashboard')} className="text-[#75BDE0] hover:underline">Back to Dashboard</button>
+                <button onClick={() => setCurrentView('dashboard')} className="text-[#75BDE0] hover:underline self-start md:self-auto">Back to Dashboard</button>
               </div>
 
               <div className="space-y-6">
@@ -1037,11 +1058,11 @@ const App = () => {
                         type="number"
                         value={newRateInput}
                         onChange={(e) => setNewRateInput(e.target.value)}
-                        className={`flex-1 p-3 rounded-xl border outline-none ${theme.input}`}
+                        className={`flex-1 p-3 rounded-xl border outline-none ${theme.input} min-w-0`}
                       />
                       <button 
                         onClick={handleUpdateRate}
-                        className="px-6 bg-[#F89B9B] text-[#0f172a] font-bold rounded-xl shadow-lg hover:opacity-90 transition-all"
+                        className="px-6 bg-[#F89B9B] text-[#0f172a] font-bold rounded-xl shadow-lg hover:opacity-90 transition-all whitespace-nowrap"
                       >
                         Update
                       </button>
@@ -1083,7 +1104,7 @@ const App = () => {
                     )}
                     <button 
                       onClick={handleChangePassword}
-                      className="px-6 py-2 bg-[#75BDE0] text-[#0f172a] font-bold rounded-xl shadow-lg hover:opacity-90 transition-all"
+                      className="px-6 py-2 bg-[#75BDE0] text-[#0f172a] font-bold rounded-xl shadow-lg hover:opacity-90 transition-all w-full md:w-auto"
                     >
                       Update Password
                     </button>
