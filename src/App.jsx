@@ -6,7 +6,8 @@ import {
   LayoutDashboard, Armchair, Settings, LogOut, 
   Search, Bell, Moon, Sun, Monitor, DollarSign,
   CheckCircle, History, TrendingUp, Receipt, Play,
-  Lock, Key, LogIn, Tag, Printer, Menu, Users
+  Lock, Key, LogIn, Tag, Printer, Menu, Users,
+  List, CalendarDays
 } from 'lucide-react';
 
 const App = () => {
@@ -24,27 +25,26 @@ const App = () => {
   const [tables, setTables] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [history, setHistory] = useState([]); 
-  const [hourlyRate, setHourlyRate] = useState(200); // Base rate for > 1 hour
+  const [hourlyRate, setHourlyRate] = useState(200); 
   
   const [currentView, setCurrentView] = useState('dashboard'); 
   const [darkMode, setDarkMode] = useState(true);
   const [startingReservationId, setStartingReservationId] = useState(null); 
   
-  // UI State
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [now, setNow] = useState(new Date()); // Live timer ticker
+  const [now, setNow] = useState(new Date()); 
 
   // Modal & Form State
   const [showModal, setShowModal] = useState(false);
   const [selectedTable, setSelectedTable] = useState(null);
-  const [modalType, setModalType] = useState(null); 
+  const [modalType, setModalType] = useState(null); // 'walkin', 'reserve' (scheduled), 'waitlist' (queue), 'edit'
   const [formData, setFormData] = useState({
     guestName: '',
     date: new Date().toISOString().split('T')[0],
     time: '',
     duration: 1,
     isOpenTime: false,
-    preferredTable: 'Any Table' // New Field
+    preferredTable: 'Any Table'
   });
   const [error, setError] = useState('');
   const [newTableName, setNewTableName] = useState('');
@@ -70,11 +70,11 @@ const App = () => {
       setTables(formattedTables);
     }
 
-    const { data: resData } = await supabase.from('reservations').select('*').order('id', { ascending: false });
+    const { data: resData } = await supabase.from('reservations').select('*').order('id', { ascending: true }); // Order by creation/time
     if (resData) {
         const formattedRes = resData.map(r => ({
             ...r,
-            tableName: r.table_name, // Can be "Any Table" or specific name
+            tableName: r.table_name, 
             guestName: r.guest_name,
             rawDate: r.raw_date,
             rawTime: r.raw_time,
@@ -114,7 +114,6 @@ const App = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // --- LIVE TIMER & CLOCK ---
   useEffect(() => {
     const timerInterval = setInterval(() => {
         setNow(new Date());
@@ -122,15 +121,19 @@ const App = () => {
     return () => clearInterval(timerInterval);
   }, []);
 
-  // --- PRICING LOGIC ---
+  // --- DERIVED LISTS ---
+  const waitlistItems = useMemo(() => 
+    reservations.filter(r => r.type === 'Waitlist'), 
+  [reservations]);
+
+  const reservationItems = useMemo(() => 
+    reservations.filter(r => r.type === 'Reservation'), 
+  [reservations]);
+
   const calculateBill = (minutes) => {
-    // Custom Pricing: 5 mins = 15, 30 mins = 50, 1 hr = 100
     if (minutes <= 5) return 15;
     if (minutes <= 30) return 50;
     if (minutes <= 60) return 100;
-    
-    // If over 1 hour, calculate based on hourly rate (default 100/hr or set by admin)
-    // Using simple proportion for time over 1 hour
     return Math.ceil((minutes / 60) * hourlyRate);
   };
 
@@ -154,7 +157,6 @@ const App = () => {
   };
 
   const handleChangePassword = async () => {
-    // ... (Existing password logic)
     if (passwordForm.current !== adminCredentials.password) {
       setPasswordMsg({ text: 'Current password is incorrect.', type: 'error' });
       return;
@@ -203,7 +205,7 @@ const App = () => {
   };
 
   const handleClearHistory = async () => {
-    if (window.confirm("CRITICAL WARNING: This will permanently delete ALL transaction history. This action cannot be undone. Are you sure?")) {
+    if (window.confirm("CRITICAL WARNING: This will permanently delete ALL transaction history.")) {
       const { error } = await supabase.from('history').delete().gt('id', 0);
       if (error) {
         alert("Failed to clear history: " + error.message);
@@ -219,10 +221,16 @@ const App = () => {
   };
 
   const resetForm = () => {
+    const now = new Date();
+    // Default time to next hour
+    now.setHours(now.getHours() + 1);
+    now.setMinutes(0);
+    const timeString = now.toTimeString().slice(0, 5);
+
     setFormData({
       guestName: '',
       date: new Date().toISOString().split('T')[0],
-      time: '',
+      time: timeString,
       duration: 1,
       isOpenTime: false,
       preferredTable: 'Any Table'
@@ -241,7 +249,6 @@ const App = () => {
       status: status, 
       amount: amount
     };
-    
     await supabase.from('history').insert([newEntry]);
     fetchAllData(); 
   };
@@ -256,36 +263,30 @@ const App = () => {
   };
 
   const handleReserveClick = (table) => {
-    setSelectedTable(table); // If null, it means "General Waitlist"
-    setModalType('reserve');
+    setSelectedTable(table); 
+    setModalType('reserve'); // Scheduled Reservation
     resetForm();
     setShowModal(true);
   };
 
   const handleJoinWaitlistClick = () => {
-    if (reservations.length >= WAITLIST_LIMIT) {
+    if (waitlistItems.length >= WAITLIST_LIMIT) {
         alert("Waitlist is currently full (Max 10).");
         return;
     }
-    setSelectedTable(null); // General waitlist, no specific table locked yet
-    setModalType('reserve');
+    setSelectedTable(null); 
+    setModalType('waitlist'); // Immediate Waitlist
     resetForm();
     setShowModal(true);
   };
 
   const handleStartReservation = (res) => {
-    // 1. Try to find the preferred table
     let tableToSelect = null;
     if (res.tableName && res.tableName !== 'Any Table') {
         tableToSelect = tables.find(t => t.name === res.tableName);
     }
     
-    // 2. If preferred table is occupied or not found (or was 'Any Table'), 
-    // force admin to select one in the modal, or pick first available?
-    // Let's just pass null if 'Any Table' so the modal forces a selection, 
-    // or pass the first available.
     if (!tableToSelect) {
-        // Try to find first available
         tableToSelect = tables.find(t => t.status === 'Available');
     }
 
@@ -294,7 +295,6 @@ const App = () => {
         return;
     }
 
-    // 3. Open the Walk-in modal (Manual Assignment)
     setSelectedTable(tableToSelect);
     setModalType('walkin');
     setFormData({
@@ -302,7 +302,7 @@ const App = () => {
       date: new Date().toISOString().split('T')[0],
       time: '',
       duration: 1,
-      isOpenTime: true, // Default to Open Time for waitlist starts
+      isOpenTime: true, 
       preferredTable: res.tableName
     });
     setStartingReservationId(res.id); 
@@ -317,11 +317,8 @@ const App = () => {
          const nowTime = new Date();
          const diffMs = nowTime - table.startTime;
          const diffMinutes = diffMs / (1000 * 60); 
-
-         // NEW PRICING LOGIC
          cost = calculateBill(diffMinutes);
        } else {
-         // Fallback if no start time (shouldn't happen with new logic)
          cost = (table.duration || 1) * hourlyRate;
        }
     }
@@ -348,10 +345,10 @@ const App = () => {
     fetchAllData(); 
   };
 
-  const handleCancelReservation = async (id) => {
+  const handleCancelReservation = async (id, type) => {
     const res = reservations.find(r => r.id === id);
     if (res) {
-      await addToHistory({ ...res, type: 'Waitlist' }, 'Canceled', 0);
+      await addToHistory({ ...res, type: type }, 'Canceled', 0);
       await supabase.from('reservations').delete().eq('id', id);
       fetchAllData();
     }
@@ -413,27 +410,18 @@ const App = () => {
       return;
     }
 
-    if (modalType === 'reserve' && !formData.guestName.trim()) {
+    if ((modalType === 'reserve' || modalType === 'waitlist') && !formData.guestName.trim()) {
       setError('Please enter a name');
       return;
     }
     
     // --- WALKIN / START SESSION LOGIC ---
     if (modalType === 'walkin') {
-      // Manual Table Assignment Check
-      if (!selectedTable) {
-        setError("Please select a table.");
-        return;
-      }
-
-      if (selectedTable.status === 'Occupied') {
-        setError("Selected table is currently occupied.");
-        return;
-      }
+      if (!selectedTable) { setError("Please select a table."); return; }
+      if (selectedTable.status === 'Occupied') { setError("Selected table is currently occupied."); return; }
       
       let occupiedUntilStr = '';
       let occupiedUntilRaw = null; 
-
       const sessionStartTime = new Date();
 
       if (formData.isOpenTime) {
@@ -464,33 +452,51 @@ const App = () => {
       
       closeModal();
       fetchAllData();
-
     } 
-    // --- WAITLIST / RESERVATION LOGIC ---
-    else if (modalType === 'reserve') {
-      if (!formData.date || !formData.time) { setError('Select date and time'); return; }
-      
-      // Check 10 person limit
-      if (reservations.length >= WAITLIST_LIMIT) {
+    
+    // --- WAITLIST LOGIC (Immediate Queue) ---
+    else if (modalType === 'waitlist') {
+      if (waitlistItems.length >= WAITLIST_LIMIT) {
           setError(`Waitlist is full (${WAITLIST_LIMIT} max).`);
           return;
       }
 
-      const newReservation = {
-        table_name: formData.preferredTable || 'Any Table', // Save preferred table
+      const newWaitlist = {
+        table_name: formData.preferredTable || 'Any Table',
         guest_name: formData.guestName,
-        raw_date: formData.date,
-        raw_time: formData.time,
-        display_date: new Date(formData.date).toLocaleDateString(),
-        display_time: convertTo12Hour(formData.time),
+        raw_date: new Date().toISOString().split('T')[0], // Today
+        raw_time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }), // Now
+        display_date: 'Today',
+        display_time: 'Waiting',
         type: 'Waitlist',
         amount: RESERVATION_FEE
       };
       
-      await supabase.from('reservations').insert([newReservation]);
-      await addToHistory(newReservation, 'Joined Waitlist', 0);
+      await supabase.from('reservations').insert([newWaitlist]);
+      await addToHistory(newWaitlist, 'Joined Waitlist', 0);
       closeModal();
       fetchAllData();
+    }
+
+    // --- RESERVATION LOGIC (Future Scheduled) ---
+    else if (modalType === 'reserve') {
+        if (!formData.date || !formData.time) { setError('Select date and time'); return; }
+
+        const newReservation = {
+            table_name: selectedTable ? selectedTable.name : (formData.preferredTable || 'Any Table'),
+            guest_name: formData.guestName,
+            raw_date: formData.date,
+            raw_time: formData.time,
+            display_date: new Date(formData.date).toLocaleDateString(),
+            display_time: convertTo12Hour(formData.time),
+            type: 'Reservation',
+            amount: RESERVATION_FEE
+        };
+        
+        await supabase.from('reservations').insert([newReservation]);
+        await addToHistory(newReservation, 'Scheduled Reservation', RESERVATION_FEE);
+        closeModal();
+        fetchAllData();
     }
   };
 
@@ -529,7 +535,7 @@ const App = () => {
         />
       )}
 
-      {/* SIDEBAR (Responsive) */}
+      {/* SIDEBAR */}
       <aside className={`
         fixed inset-y-0 left-0 z-50 w-72 flex flex-col transition-transform duration-300 transform 
         ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} 
@@ -630,7 +636,6 @@ const App = () => {
           </div>
           
           <div className="flex items-center gap-3 md:gap-6">
-             {/* Public Join Waitlist Button */}
              {currentView === 'dashboard' && (
                 <button 
                     onClick={handleJoinWaitlistClick}
@@ -646,17 +651,15 @@ const App = () => {
           
           {currentView === 'dashboard' && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 max-w-7xl mx-auto print:hidden">
+              
+              {/* TABLES SECTION */}
               <div className="xl:col-span-2 space-y-6">
-                <div className="text-center mb-8 xl:text-left xl:mb-0">
-                  <p className={`${theme.textMuted} text-lg`}>Reserve your table for the perfect game</p>
-                </div>
-
-                <div className="flex items-center justify-between mt-8">
+                <div className="flex items-center justify-between mt-2">
                   <h3 className={`text-lg font-bold flex items-center gap-2 ${theme.text}`}>
                     <div className="w-1.5 h-6 bg-[#75BDE0] rounded-full"></div>
-                    Available Tables
+                    Floor Plan
                   </h3>
-                  <span className={`text-sm ${theme.textMuted}`}>{tables.filter(t => t.status === 'Available').length} available now</span>
+                  <span className={`text-sm ${theme.textMuted}`}>{tables.filter(t => t.status === 'Available').length} available</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -680,7 +683,6 @@ const App = () => {
                         </div>
                         {table.status === 'Occupied' && (
                           <div className="text-right">
-                             {/* LIVE TIMER DISPLAY */}
                             <p className="text-xl font-black text-[#F89B9B] tabular-nums tracking-tight">
                                 {formatLiveTime(table.startTime)}
                             </p>
@@ -695,7 +697,7 @@ const App = () => {
                       <div className="flex gap-3 pt-2">
                         {table.status === 'Available' ? (
                           <>
-                            <button onClick={() => handleReserveClick(table)} className="flex-1 py-2.5 rounded-lg bg-[#75BDE0] hover:bg-[#64a9cc] text-white text-sm font-bold shadow-md shadow-[#75BDE0]/20 transition-all active:scale-95">Reserve</button>
+                            <button onClick={() => handleReserveClick(table)} className="flex-1 py-2.5 rounded-lg bg-[#75BDE0] hover:bg-[#64a9cc] text-white text-sm font-bold shadow-md shadow-[#75BDE0]/20 transition-all active:scale-95">Schedule</button>
                             {isAuthenticated && (
                               <button onClick={() => handleWalkInClick(table)} className="flex-1 py-2.5 rounded-lg bg-[#F8BC9B] hover:bg-[#e6ab8c] text-white text-sm font-bold shadow-md shadow-[#F8BC9B]/20 transition-all active:scale-95">Walk-In</button>
                             )}
@@ -718,66 +720,105 @@ const App = () => {
                 </div>
               </div>
 
+              {/* LISTS SECTION (SPLIT) */}
               <div className="xl:col-span-1 space-y-6">
-                <div className="flex items-center justify-between">
-                  <h3 className={`text-lg font-bold flex items-center gap-2 ${theme.text}`}>
-                    <div className="w-1.5 h-6 bg-[#F8D49B] rounded-full"></div>
-                    Waiting List ({reservations.length}/{WAITLIST_LIMIT})
-                  </h3>
+                
+                {/* 1. WAITLIST CONTAINER */}
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className={`text-lg font-bold flex items-center gap-2 ${theme.text}`}>
+                      <div className="w-1.5 h-6 bg-[#F8D49B] rounded-full"></div>
+                      Waiting List ({waitlistItems.length}/{WAITLIST_LIMIT})
+                    </h3>
+                  </div>
+
+                  <div className={`${theme.card} rounded-3xl p-4 border min-h-[200px]`}>
+                    {waitlistItems.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center py-8">
+                         <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${darkMode ? 'bg-[#334155]' : 'bg-slate-100'}`}>
+                          <List className={`w-6 h-6 ${theme.textMuted}`} />
+                        </div>
+                        <p className={`text-sm ${theme.textMuted}`}>No active waitlist.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {waitlistItems.map(res => (
+                          <div key={res.id} className={`group flex items-center justify-between p-3 rounded-xl border transition-all ${theme.subCard} hover:border-[#F8D49B]/50`}>
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-[#F8D49B] flex items-center justify-center text-[#0f172a] font-bold text-xs">
+                                {res.id}
+                              </div>
+                              <div>
+                                <p className={`font-bold text-sm ${theme.text}`}>{res.guestName}</p>
+                                <p className={`text-xs ${theme.textMuted}`}>Pref: {res.tableName}</p>
+                              </div>
+                            </div>
+                            <div className="text-right flex flex-col items-end gap-1">
+                               {isAuthenticated && (
+                                <div className="flex gap-1">
+                                  <button onClick={() => handleStartReservation(res)} className="text-xs text-[#0f172a] font-bold bg-[#F8BC9B] px-2 py-1 rounded shadow-sm">Start</button>
+                                  <button onClick={() => handleCancelReservation(res.id, 'Waitlist')} className="text-xs text-red-400 p-1"><X className="w-4 h-4"/></button>
+                                </div>
+                               )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div className={`${theme.card} rounded-3xl p-6 border min-h-[400px]`}>
-                  {reservations.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center py-12">
-                      <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${darkMode ? 'bg-[#334155]' : 'bg-slate-100'}`}>
-                        <Calendar className={`w-8 h-8 ${theme.textMuted}`} />
-                      </div>
-                      <p className={theme.textMuted}>Waiting list is empty.</p>
-                      <button onClick={handleJoinWaitlistClick} className="mt-4 text-[#75BDE0] font-bold text-sm hover:underline">Join Now</button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {reservations.map(res => (
-                        <div key={res.id} className={`group flex items-center justify-between p-4 rounded-2xl border transition-all ${theme.subCard} hover:border-[#F8D49B]/50`}>
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#75BDE0] to-[#F89B9B] p-[2px]">
-                              <div className={`w-full h-full rounded-full flex items-center justify-center ${darkMode ? 'bg-[#0f172a]' : 'bg-slate-50'}`}>
-                                <User className={`w-4 h-4 ${theme.text}`} />
-                              </div>
-                            </div>
-                            <div>
-                              <p className={`font-bold ${theme.text}`}>{res.guestName}</p>
-                              <p className={`text-xs ${theme.textMuted}`}>Preferred: {res.tableName}</p>
-                              <p className={`text-[10px] ${theme.textMuted}`}>{res.displayDate} @ {res.displayTime}</p>
-                            </div>
-                          </div>
-                          <div className="text-right flex flex-col items-end gap-1">
-                            {isAuthenticated && (
-                              <div className="flex gap-2">
-                                <button 
-                                  onClick={() => handleStartReservation(res)}
-                                  className="text-xs text-[#0f172a] font-bold bg-[#F8BC9B] hover:bg-[#e6ab8c] px-3 py-1.5 rounded-md transition-colors shadow-sm"
-                                >
-                                  Start
-                                </button>
-                                <button 
-                                  onClick={() => handleCancelReservation(res.id)}
-                                  className="text-xs text-red-400 hover:text-red-300 transition-opacity p-1.5"
-                                >
-                                  <X className="w-4 h-4"/>
-                                </button>
-                              </div>
-                            )}
-                          </div>
+                {/* 2. RESERVATIONS CONTAINER */}
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className={`text-lg font-bold flex items-center gap-2 ${theme.text}`}>
+                      <div className="w-1.5 h-6 bg-[#75BDE0] rounded-full"></div>
+                      Upcoming Reservations
+                    </h3>
+                  </div>
+
+                  <div className={`${theme.card} rounded-3xl p-4 border min-h-[200px]`}>
+                    {reservationItems.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center py-8">
+                         <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${darkMode ? 'bg-[#334155]' : 'bg-slate-100'}`}>
+                          <CalendarDays className={`w-6 h-6 ${theme.textMuted}`} />
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <p className={`text-sm ${theme.textMuted}`}>No future bookings.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {reservationItems.map(res => (
+                          <div key={res.id} className={`group flex items-center justify-between p-3 rounded-xl border transition-all ${theme.subCard} hover:border-[#75BDE0]/50`}>
+                            <div className="flex items-center gap-3">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${darkMode ? 'bg-[#334155]' : 'bg-slate-200'} ${theme.text}`}>
+                                <Clock className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <p className={`font-bold text-sm ${theme.text}`}>{res.guestName}</p>
+                                <p className={`text-xs ${theme.textMuted}`}>{res.displayDate} @ {res.displayTime}</p>
+                              </div>
+                            </div>
+                            <div className="text-right flex flex-col items-end gap-1">
+                               <p className="text-xs font-bold text-[#75BDE0]">{res.tableName}</p>
+                               {isAuthenticated && (
+                                <div className="flex gap-1">
+                                  <button onClick={() => handleStartReservation(res)} className="text-xs text-white font-bold bg-[#75BDE0] px-2 py-1 rounded shadow-sm">Start</button>
+                                  <button onClick={() => handleCancelReservation(res.id, 'Reservation')} className="text-xs text-red-400 p-1"><X className="w-4 h-4"/></button>
+                                </div>
+                               )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
+
               </div>
             </div>
           )}
-
+          
+          {/* ... (Existing Login, Earnings, Management, Settings Views remain unchanged) ... */}
           {currentView === 'login' && (
             <div className="flex items-center justify-center h-full">
               <div className={`w-full max-w-md p-8 rounded-3xl shadow-2xl border ${theme.card} animate-in fade-in zoom-in-95`}>
@@ -965,10 +1006,7 @@ const App = () => {
                 <h3 className={`text-2xl font-bold ${theme.text}`}>System Settings</h3>
                 <button onClick={() => setCurrentView('dashboard')} className="text-[#75BDE0] hover:underline">Back to Dashboard</button>
               </div>
-
               <div className="space-y-6">
-                
-                {/* PRICING SETTINGS */}
                 <div className={`p-6 rounded-2xl border ${theme.subCard}`}>
                   <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme.text}`}>
                     <Tag className="w-5 h-5 text-[#F89B9B]" /> Pricing Configuration
@@ -993,12 +1031,10 @@ const App = () => {
                   </div>
                 </div>
 
-                {/* (Keep existing password and theme settings code here) */}
                 <div className={`p-6 rounded-2xl border ${theme.subCard}`}>
                   <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme.text}`}>
                     <Key className="w-5 h-5 text-[#F8BC9B]" /> Change Password
                   </h4>
-                  {/* ... Same Password Form as before ... */}
                    <div className="space-y-4 max-w-md">
                     <input 
                       type="password"
@@ -1034,9 +1070,7 @@ const App = () => {
                     </button>
                   </div>
                 </div>
-                 {/* ... End Password Form ... */}
                  
-                 {/* Appearance */}
                  <div className={`p-6 rounded-2xl border ${theme.subCard}`}>
                   <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme.text}`}>
                     <Monitor className="w-5 h-5 text-[#F8BC9B]" /> Appearance
@@ -1056,11 +1090,9 @@ const App = () => {
                     </button>
                   </div>
                 </div>
-
               </div>
             </div>
           )}
-
         </div>
       </main>
 
@@ -1071,11 +1103,11 @@ const App = () => {
             <div className={`p-6 ${modalType === 'walkin' ? 'bg-[#F8BC9B]' : 'bg-[#75BDE0]'} text-[#0f172a]`}>
               <div className="flex justify-between items-center mb-1">
                 <h3 className="text-2xl font-black">
-                  {modalType === 'walkin' ? 'Walk-In Session' : modalType === 'reserve' ? 'Join Waitlist' : 'Edit Table'}
+                  {modalType === 'walkin' ? 'Walk-In Session' : modalType === 'waitlist' ? 'Join Waitlist' : modalType === 'reserve' ? 'Schedule Reservation' : 'Edit Table'}
                 </h3>
                 <button onClick={closeModal} className="p-1 bg-black/10 rounded-full hover:bg-black/20"><X className="w-5 h-5"/></button>
               </div>
-              <p className="font-medium opacity-80">{selectedTable ? selectedTable.name : 'General Waiting List'}</p>
+              <p className="font-medium opacity-80">{selectedTable ? selectedTable.name : 'Waitlist Entry'}</p>
             </div>
             
             <div className="p-6 space-y-5">
@@ -1114,9 +1146,9 @@ const App = () => {
                  </div>
               )}
 
-              {modalType === 'reserve' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2">
+              {/* SHARED: PREFERRED TABLE FOR WAITLIST & RESERVE */}
+              {(modalType === 'waitlist' || modalType === 'reserve') && (
+                  <div>
                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Preferred Table</label>
                      <select 
                         value={formData.preferredTable}
@@ -1130,6 +1162,11 @@ const App = () => {
                      </select>
                      <p className="text-[10px] text-slate-500 mt-1 italic">* Note: Table preparation may take 5 minutes.</p>
                   </div>
+              )}
+
+              {/* SPECIFIC: RESERVE (DATE/TIME) */}
+              {modalType === 'reserve' && (
+                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Date</label>
                     <input 
@@ -1187,7 +1224,7 @@ const App = () => {
                     </div>
                     {startingReservationId && (
                       <div className="mt-2 text-green-600 bg-green-100 px-2 py-1 rounded w-fit">
-                        -₱{RESERVATION_FEE} (Waitlist Deposit)
+                        -₱{RESERVATION_FEE} (Deposit)
                       </div>
                     )}
                   </div>
