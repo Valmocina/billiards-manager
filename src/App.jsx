@@ -12,7 +12,7 @@ import {
 
 const App = () => {
   // --- CONSTANTS ---
-  const RESERVATION_FEE = 15; // UPDATED to 15
+  const RESERVATION_FEE = 15; 
   const WAITLIST_LIMIT = 10;
 
   // --- AUTH STATE ---
@@ -25,14 +25,14 @@ const App = () => {
   const [tables, setTables] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [history, setHistory] = useState([]); 
-  const [hourlyRate, setHourlyRate] = useState(200); 
+  const [hourlyRate, setHourlyRate] = useState(100); // Default updated to 100 based on new rates
   
   const [currentView, setCurrentView] = useState('dashboard'); 
   const [darkMode, setDarkMode] = useState(true);
   
   // Track reservation start details
   const [startingReservationId, setStartingReservationId] = useState(null); 
-  const [startingReservationType, setStartingReservationType] = useState(null); // New state to track if it's Waitlist or Reservation
+  const [startingReservationType, setStartingReservationType] = useState(null);
   
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [now, setNow] = useState(new Date()); 
@@ -133,10 +133,25 @@ const App = () => {
     reservations.filter(r => r.type === 'Reservation'), 
   [reservations]);
 
+  // --- NEW PRICING LOGIC ---
   const calculateBill = (minutes) => {
-    if (minutes <= 5) return 15;
-    if (minutes <= 30) return 50;
-    if (minutes <= 60) return 100;
+    // Round up to nearest whole minute to avoid float issues
+    const m = Math.ceil(minutes);
+
+    if (m <= 5) return 15;
+    if (m <= 10) return 20;
+    if (m <= 15) return 25;
+    if (m <= 20) return 30;
+    if (m <= 25) return 40;
+    if (m <= 30) return 50;
+    if (m <= 35) return 60;
+    if (m <= 40) return 70;
+    if (m <= 45) return 75;
+    if (m <= 50) return 80;
+    if (m <= 55) return 90;
+    if (m <= 60) return 100;
+
+    // Over 1 hour: Pro-rate based on hourly rate (Default 100)
     return Math.ceil((minutes / 60) * hourlyRate);
   };
 
@@ -225,7 +240,6 @@ const App = () => {
 
   const resetForm = () => {
     const now = new Date();
-    // Default time to next hour
     now.setHours(now.getHours() + 1);
     now.setMinutes(0);
     const timeString = now.toTimeString().slice(0, 5);
@@ -268,7 +282,7 @@ const App = () => {
 
   const handleReserveClick = (table) => {
     setSelectedTable(table); 
-    setModalType('reserve'); // Scheduled Reservation
+    setModalType('reserve'); 
     resetForm();
     setShowModal(true);
   };
@@ -279,7 +293,7 @@ const App = () => {
         return;
     }
     setSelectedTable(null); 
-    setModalType('waitlist'); // Immediate Waitlist
+    setModalType('waitlist'); 
     resetForm();
     setShowModal(true);
   };
@@ -310,7 +324,7 @@ const App = () => {
       preferredTable: res.tableName
     });
     setStartingReservationId(res.id); 
-    setStartingReservationType(res.type); // Track if it was Waitlist or Reservation
+    setStartingReservationType(res.type); 
     setShowModal(true);
   };
 
@@ -1224,10 +1238,12 @@ const App = () => {
                     <div className="flex justify-between items-center mb-1">
                          <span>Pricing Rates:</span>
                     </div>
-                    <div className="flex justify-between opacity-80">
-                         <span>5 mins: ₱15</span>
-                         <span>30 mins: ₱50</span>
-                         <span>1 hr: ₱100</span>
+                    <div className="flex justify-between opacity-80 text-[10px] space-x-1">
+                         <span>5m:₱15</span>
+                         <span>15m:₱25</span>
+                         <span>30m:₱50</span>
+                         <span>45m:₱75</span>
+                         <span>1h:₱100</span>
                     </div>
                     {/* Only show deposit deduction if it was a SCHEDULED RESERVATION */}
                     {(startingReservationId && startingReservationType === 'Reservation') && (
