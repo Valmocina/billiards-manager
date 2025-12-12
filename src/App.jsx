@@ -311,17 +311,17 @@ const App = () => {
     
     if (table.sessionType === 'walkin') {
        if (table.isOpenTime && table.startTime) {
-          const now = new Date();
-          const diffMs = now - table.startTime;
-          const diffMinutes = diffMs / (1000 * 60); 
+         const now = new Date();
+         const diffMs = now - table.startTime;
+         const diffMinutes = diffMs / (1000 * 60); 
 
-          if (diffMinutes <= 35) {
-            cost = hourlyRate / 2;
-          } else {
-            cost = (diffMinutes / 60) * hourlyRate;
-          }
+         if (diffMinutes <= 35) {
+           cost = hourlyRate / 2;
+         } else {
+           cost = (diffMinutes / 60) * hourlyRate;
+         }
        } else {
-          cost = (table.duration || 1) * hourlyRate;
+         cost = (table.duration || 1) * hourlyRate;
        }
     }
 
@@ -503,8 +503,6 @@ const App = () => {
     } 
     else if (modalType === 'reserve') {
       if (!formData.date || !formData.time) { setError('Select date and time'); return; }
-      const [h] = formData.time.split(':').map(Number);
-      if (h < 7) { setError('Reservations allow 7 AM - 11:59 PM.'); return; }
       
       if (selectedTable.status === 'Occupied' && selectedTable.occupiedUntilRaw) {
         const reservationStart = new Date(`${formData.date}T${formData.time}`);
@@ -1244,7 +1242,7 @@ const App = () => {
                         );
                       }
                       return null;
-                   })()}
+                    })()}
                 </div>
               )}
 
