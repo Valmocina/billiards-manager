@@ -45,6 +45,7 @@ const App = () => {
     time: '',
     duration: 1,
     isOpenTime: false,
+    preferredTable: 'Any Table'
   });
   const [error, setError] = useState('');
   const [newTableName, setNewTableName] = useState('');
@@ -55,7 +56,6 @@ const App = () => {
   const [newRateInput, setNewRateInput] = useState(''); 
 
   // --- DERIVED STATE ---
-  // Split reservations into "Waitlist" (Any Table) and "Scheduled" (Specific Time/Table)
   const waitlistQueue = useMemo(() => 
     reservations.filter(r => r.type === 'Waitlist'), 
   [reservations]);
@@ -149,7 +149,6 @@ const App = () => {
       const currentTimeVal = now.getHours() * 60 + now.getMinutes();
 
       for (const res of reservations) {
-        // Skip "Waitlist" items for auto-start, only check scheduled ones
         if (res.type === 'Waitlist') continue;
 
         if (res.rawDate === todayStr) {
@@ -307,7 +306,8 @@ const App = () => {
       date: new Date().toISOString().split('T')[0],
       time: '',
       duration: 1,
-      isOpenTime: false
+      isOpenTime: false,
+      preferredTable: 'Any Table'
     });
     setError('');
     setStartingReservationId(null);
@@ -353,26 +353,23 @@ const App = () => {
   };
 
   const handleStartReservation = (res) => {
-    let table;
-    
-    // Logic for "Any Table" waitlist items
-    if (res.tableName === 'Any Table') {
-      // Find the first available table
-      table = tables.find(t => t.status === 'Available');
-      
-      if (!table) {
-        alert("No tables are currently available. Please wait for a table to finish.");
-        return;
-      }
-      
-      if (!window.confirm(`Assign ${res.guestName} to ${table.name}?`)) {
-        return;
-      }
-    } else {
-      // Logic for specific table reservations
-      table = tables.find(t => t.name === res.tableName);
+    // If it is a Waitlist item (Any Table OR Specific Preference)
+    // Always open assignment modal to allow flexibility
+    if (res.type === 'Waitlist') {
+      setStartingReservationId(res.id);
+      setFormData({
+        ...formData,
+        guestName: res.guestName,
+        duration: 1,
+        isOpenTime: true
+      });
+      setModalType('assign'); 
+      setShowModal(true);
+      return;
     }
-
+    
+    // Logic for specific scheduled reservations
+    const table = tables.find(t => t.name === res.tableName);
     if (!table) return;
 
     if (table.status === 'Occupied') {
@@ -543,14 +540,14 @@ const App = () => {
       const now = new Date();
       const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
       const newReservation = {
-        table_name: 'Any Table', // Magic string to denote waitlist
+        table_name: formData.preferredTable, // Use the selected preferred table
         guest_name: formData.guestName,
         raw_date: now.toISOString().split('T')[0],
         raw_time: timeStr,
         display_date: now.toLocaleDateString(),
         display_time: convertTo12Hour(timeStr),
         type: 'Waitlist',
-        amount: 0 // No fee for simple waitlist
+        amount: 0 
       };
       
       await supabase.from('reservations').insert([newReservation]);
@@ -917,22 +914,21 @@ const App = () => {
               {/* RIGHT COLUMN - SPLIT CONTAINERS */}
               <div className="xl:col-span-1 space-y-6">
                 
-                {/* CONTAINER 1: WALK-IN WAITLIST */}
+                {/* CONTAINER 1: WAITLIST */}
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <h3 className={`text-lg font-bold flex items-center gap-2 ${theme.text}`}>
                       <div className="w-1.5 h-6 bg-[#F8D49B] rounded-full"></div>
-                      Walk-In Waitlist
+                      Waitlist
                     </h3>
-                    {isAuthenticated && (
-                      <button 
-                        onClick={handleWaitlistClick}
-                        className="p-2 rounded-full bg-[#F8D49B]/20 hover:bg-[#F8D49B]/40 text-[#F8D49B] transition-colors"
-                        title="Add to Waitlist"
-                      >
-                        <Plus className="w-5 h-5" />
-                      </button>
-                    )}
+                    
+                    {/* ADD TO WAITLIST BUTTON - PUBLICLY ACCESSIBLE */}
+                    <button 
+                      onClick={handleWaitlistClick}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#F8D49B] hover:bg-[#e6c48f] text-[#0f172a] text-sm font-bold shadow-md transition-colors"
+                    >
+                      <Plus className="w-4 h-4" /> Join Waitlist
+                    </button>
                   </div>
 
                   <div className={`${theme.card} rounded-3xl p-6 border min-h-[200px]`}>
@@ -951,7 +947,13 @@ const App = () => {
                               <span className={`text-lg font-bold ${theme.textMuted} w-6`}>#{index + 1}</span>
                               <div>
                                 <p className={`font-bold ${theme.text}`}>{res.guestName}</p>
-                                <p className={`text-xs ${theme.textMuted}`}>Joined at {res.displayTime}</p>
+                                <p className={`text-xs ${theme.textMuted}`}>
+                                  {res.tableName === 'Any Table' ? (
+                                    <span className="text-[#F8D49B] font-bold">Any Table</span>
+                                  ) : (
+                                    <span><span className="text-[#F8D49B] font-bold">{res.tableName}</span> • {res.displayTime}</span>
+                                  )}
+                                </p>
                               </div>
                             </div>
                             {isAuthenticated && (
@@ -1009,304 +1011,6 @@ const App = () => {
             </div>
           )}
 
-          {currentView === 'login' && (
-            <div className="flex items-center justify-center h-full">
-              <div className={`w-full max-w-md p-8 rounded-3xl shadow-2xl border ${theme.card} animate-in fade-in zoom-in-95`}>
-                <div className="text-center mb-8">
-                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#75BDE0] to-[#F8BC9B] flex items-center justify-center text-[#0f172a] font-bold text-2xl shadow-lg mx-auto mb-4">B&C</div>
-                  <h1 className={`text-2xl font-bold ${theme.text}`}>Admin Login</h1>
-                  <p className={theme.textMuted}>Enter your credentials to continue</p>
-                </div>
-                
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div>
-                    <label className={`block text-sm font-bold mb-2 ${theme.textMuted}`}>Username</label>
-                    <div className={`flex items-center px-4 py-3 rounded-xl border ${theme.subCard}`}>
-                      <User className="w-5 h-5 text-[#75BDE0] mr-3" />
-                      <input 
-                        type="text" 
-                        value={loginInput.username}
-                        onChange={(e) => setLoginInput({...loginInput, username: e.target.value})}
-                        className={`bg-transparent border-none outline-none flex-1 text-sm font-medium ${theme.text}`}
-                        placeholder="Enter username"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className={`block text-sm font-bold mb-2 ${theme.textMuted}`}>Password</label>
-                    <div className={`flex items-center px-4 py-3 rounded-xl border ${theme.subCard}`}>
-                      <Lock className="w-5 h-5 text-[#F8BC9B] mr-3" />
-                      <input 
-                        type="password" 
-                        value={loginInput.password}
-                        onChange={(e) => setLoginInput({...loginInput, password: e.target.value})}
-                        className={`bg-transparent border-none outline-none flex-1 text-sm font-medium ${theme.text}`}
-                        placeholder="Enter password"
-                      />
-                    </div>
-                  </div>
-                  
-                  {loginError && <p className="text-red-400 text-sm text-center font-bold">{loginError}</p>}
-                  
-                  <button type="submit" className="w-full py-4 bg-gradient-to-r from-[#75BDE0] to-[#F89B9B] rounded-xl text-[#0f172a] font-bold shadow-lg hover:shadow-xl hover:opacity-90 transition-all mt-4">
-                    Sign In
-                  </button>
-                  <button type="button" onClick={() => setCurrentView('dashboard')} className={`w-full py-4 rounded-xl font-bold transition-all mt-2 ${theme.textMuted} hover:${theme.text}`}>
-                    Back to Dashboard
-                  </button>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {currentView === 'earnings' && isAuthenticated && (
-            <div className="max-w-7xl mx-auto space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 print:hidden">
-                <div className={`${theme.card} p-6 rounded-3xl border flex items-center gap-4`}>
-                  <div className="w-16 h-16 rounded-full bg-[#75BDE0]/20 flex items-center justify-center">
-                    <DollarSign className="w-8 h-8 text-[#75BDE0]" />
-                  </div>
-                  <div>
-                    <p className={theme.textMuted}>Total Revenue</p>
-                    <h3 className={`text-3xl font-bold ${theme.text}`}>₱{totalEarnings.toLocaleString()}</h3>
-                  </div>
-                </div>
-                <div className={`${theme.card} p-6 rounded-3xl border flex items-center gap-4`}>
-                  <div className="w-16 h-16 rounded-full bg-[#F8BC9B]/20 flex items-center justify-center">
-                    <CheckCircle className="w-8 h-8 text-[#F8BC9B]" />
-                  </div>
-                  <div>
-                    <p className={theme.textMuted}>Completed Sessions</p>
-                    <h3 className={`text-3xl font-bold ${theme.text}`}>{history.filter(h => h.status === 'Completed').length}</h3>
-                  </div>
-                </div>
-                <div className={`${theme.card} p-6 rounded-3xl border flex items-center gap-4`}>
-                  <div className="w-16 h-16 rounded-full bg-[#F89B9B]/20 flex items-center justify-center">
-                    <Calendar className="w-8 h-8 text-[#F89B9B]" />
-                  </div>
-                  <div>
-                    <p className={theme.textMuted}>Total Reservations</p>
-                    <h3 className={`text-3xl font-bold ${theme.text}`}>{history.filter(h => h.type === 'Reservation').length}</h3>
-                  </div>
-                </div>
-              </div>
-
-              <div className={`${theme.card} rounded-3xl p-4 md:p-8 border print:border-none print:p-0 print:shadow-none`}>
-                <div className="flex items-center justify-between mb-6 print:mb-4">
-                  <h3 className={`text-xl font-bold ${theme.text}`}>Recent Transactions</h3>
-                  <div className="flex items-center gap-4 print:hidden">
-                    <div className="hidden md:flex text-red-400 text-xs font-bold items-center gap-1 bg-red-500/10 px-2 py-1 rounded">
-                      <AlertCircle className="w-3 h-3" /> Warning: Deletion is permanent
-                    </div>
-                    <button 
-                      onClick={handleClearHistory} 
-                      className="flex items-center gap-2 px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-bold transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" /> <span className="hidden md:inline">Clear All</span>
-                    </button>
-                    <button 
-                      onClick={handlePrint}
-                      className="flex items-center gap-2 px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-bold transition-colors"
-                    >
-                      <Printer className="w-4 h-4" /> <span className="hidden md:inline">Print</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead className={`${theme.tableHeader} border-b ${darkMode ? 'border-[#334155]' : 'border-slate-200'}`}>
-                      <tr>
-                        <th className="pb-4 pl-4 whitespace-nowrap">Type</th>
-                        <th className="pb-4 whitespace-nowrap">Guest</th>
-                        <th className="pb-4 whitespace-nowrap">Details</th>
-                        <th className="pb-4 whitespace-nowrap">Status</th>
-                        <th className="pb-4 pr-4 text-right whitespace-nowrap">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-700/20">
-                      {history.length === 0 ? (
-                        <tr><td colSpan="5" className={`py-8 text-center ${theme.textMuted}`}>No transaction history yet.</td></tr>
-                      ) : history.map((item) => (
-                        <tr key={item.id} className="hover:bg-slate-500/5">
-                          <td className="py-4 pl-4">
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${item.type === 'Reservation' ? 'bg-[#75BDE0]/10 text-[#75BDE0]' : 'bg-[#F8BC9B]/10 text-[#F8BC9B]'}`}>
-                              {item.type}
-                            </span>
-                          </td>
-                          <td className={`py-4 ${theme.text} whitespace-nowrap`}>{item.guestName}</td>
-                          <td className={`py-4 ${theme.textMuted} whitespace-nowrap`}>{item.tableName} • {item.date}</td>
-                          <td className="py-4">
-                            <span className={`text-xs font-bold ${
-                              item.status === 'Completed' ? 'text-emerald-400' : 
-                              item.status === 'Canceled' ? 'text-red-400' : 'text-[#75BDE0]'
-                            }`}>
-                              {item.status}
-                            </span>
-                          </td>
-                          <td className={`py-4 pr-4 text-right font-bold ${theme.text}`}>₱{item.amount}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {currentView === 'management' && isAuthenticated && (
-            <div className={`max-w-4xl mx-auto rounded-3xl p-4 md:p-8 border ${theme.card}`}>
-              <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-                <h3 className={`text-2xl font-bold ${theme.text}`}>Table Management</h3>
-                <button onClick={() => setCurrentView('dashboard')} className="text-[#75BDE0] hover:underline self-start md:self-auto">Back to Dashboard</button>
-              </div>
-              
-              <div className={`p-6 rounded-2xl border mb-8 ${theme.subCard}`}>
-                <label className={`block text-sm font-bold mb-3 ${theme.textMuted}`}>Add New Table</label>
-                <div className="flex gap-4">
-                  <input 
-                    type="text" 
-                    value={newTableName}
-                    onChange={(e) => setNewTableName(e.target.value)}
-                    placeholder="Enter table name"
-                    className={`flex-1 rounded-xl px-4 focus:border-[#75BDE0] outline-none ${theme.input} min-w-0`}
-                  />
-                  <button onClick={handleAddTable} className="bg-[#75BDE0] hover:bg-[#64a9cc] text-[#0f172a] font-bold px-6 rounded-xl transition-colors whitespace-nowrap">Add</button>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {tables.map(table => (
-                  <div key={table.id} className={`flex items-center justify-between p-4 rounded-xl border ${theme.subCard}`}>
-                    <span className={`font-bold ${theme.text}`}>{table.name}</span>
-                    <div className="flex gap-2">
-                      <button onClick={() => openEditModal(table)} className="p-2 text-[#75BDE0] hover:bg-[#75BDE0]/10 rounded-lg"><Edit2 className="w-4 h-4" /></button>
-                      <button onClick={() => handleDeleteTable(table.id)} className="p-2 text-[#F89B9B] hover:bg-[#F89B9B]/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {currentView === 'settings' && isAuthenticated && (
-            <div className={`max-w-4xl mx-auto rounded-3xl p-4 md:p-8 border ${theme.card}`}>
-              <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-                <h3 className={`text-2xl font-bold ${theme.text}`}>System Settings</h3>
-                <button onClick={() => setCurrentView('dashboard')} className="text-[#75BDE0] hover:underline self-start md:self-auto">Back to Dashboard</button>
-              </div>
-
-              <div className="space-y-6">
-                
-                {/* PRICING SETTINGS */}
-                <div className={`p-6 rounded-2xl border ${theme.subCard}`}>
-                  <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme.text}`}>
-                    <Tag className="w-5 h-5 text-[#F89B9B]" /> Pricing Configuration
-                  </h4>
-                  <div className="max-w-md">
-                    <label className={`block text-sm font-bold mb-2 ${theme.textMuted}`}>Hourly Rate (PHP)</label>
-                    <div className="flex gap-4">
-                      <input 
-                        type="number"
-                        value={newRateInput}
-                        onChange={(e) => setNewRateInput(e.target.value)}
-                        className={`flex-1 p-3 rounded-xl border outline-none ${theme.input} min-w-0`}
-                      />
-                      <button 
-                        onClick={handleUpdateRate}
-                        className="px-6 bg-[#F89B9B] text-[#0f172a] font-bold rounded-xl shadow-lg hover:opacity-90 transition-all whitespace-nowrap"
-                      >
-                        Update
-                      </button>
-                    </div>
-                    <p className={`text-xs mt-2 ${theme.textMuted}`}>Current active rate: ₱{hourlyRate}/hr</p>
-                  </div>
-                </div>
-
-                <div className={`p-6 rounded-2xl border ${theme.subCard}`}>
-                  <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme.text}`}>
-                    <Key className="w-5 h-5 text-[#F8BC9B]" /> Change Password
-                  </h4>
-                  <div className="space-y-4 max-w-md">
-                    <input 
-                      type="password"
-                      placeholder="Current Password" 
-                      value={passwordForm.current}
-                      onChange={(e) => setPasswordForm({...passwordForm, current: e.target.value})}
-                      className={`w-full p-3 rounded-xl border outline-none ${theme.input}`}
-                    />
-                    <input 
-                      type="password"
-                      placeholder="New Password" 
-                      value={passwordForm.new}
-                      onChange={(e) => setPasswordForm({...passwordForm, new: e.target.value})}
-                      className={`w-full p-3 rounded-xl border outline-none ${theme.input}`}
-                    />
-                    <input 
-                      type="password"
-                      placeholder="Confirm New Password" 
-                      value={passwordForm.confirm}
-                      onChange={(e) => setPasswordForm({...passwordForm, confirm: e.target.value})}
-                      className={`w-full p-3 rounded-xl border outline-none ${theme.input}`}
-                    />
-                    {passwordMsg.text && (
-                      <p className={`text-sm font-bold ${passwordMsg.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
-                        {passwordMsg.text}
-                      </p>
-                    )}
-                    <button 
-                      onClick={handleChangePassword}
-                      className="px-6 py-2 bg-[#75BDE0] text-[#0f172a] font-bold rounded-xl shadow-lg hover:opacity-90 transition-all w-full md:w-auto"
-                    >
-                      Update Password
-                    </button>
-                  </div>
-                </div>
-
-                <div className={`p-6 rounded-2xl border ${theme.subCard}`}>
-                  <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme.text}`}>
-                    <Monitor className="w-5 h-5 text-[#F8BC9B]" /> Appearance
-                  </h4>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className={`font-bold ${theme.text}`}>Theme Preference</p>
-                      <p className={`text-sm ${theme.textMuted}`}>Switch between light and dark mode</p>
-                    </div>
-                    <button 
-                      onClick={() => setDarkMode(!darkMode)}
-                      className={`relative w-16 h-8 rounded-full transition-colors duration-300 ${darkMode ? 'bg-[#75BDE0]' : 'bg-slate-300'}`}
-                    >
-                      <div className={`absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow-md transform transition-transform duration-300 flex items-center justify-center ${darkMode ? 'translate-x-8' : 'translate-x-0'}`}>
-                        {darkMode ? <Moon className="w-3 h-3 text-[#75BDE0]" /> : <Sun className="w-3 h-3 text-orange-400" />}
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                <div className={`p-6 rounded-2xl border ${theme.subCard}`}>
-                  <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme.text}`}>
-                    <History className="w-5 h-5 text-[#F89B9B]" /> History Log
-                  </h4>
-                  <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                    {history.length === 0 ? (
-                      <p className={`text-sm ${theme.textMuted}`}>No history available.</p>
-                    ) : history.map((h) => (
-                      <div key={h.id} className={`flex justify-between items-center p-3 rounded-xl border ${darkMode ? 'border-[#334155] bg-[#1e293b]/50' : 'border-slate-200 bg-white'}`}>
-                        <div>
-                          <p className={`text-sm font-bold ${theme.text}`}>{h.type}: {h.tableName}</p>
-                          <p className={`text-xs ${theme.textMuted}`}>{h.date} - {h.status}</p>
-                        </div>
-                        <span className={`text-sm font-bold ${h.status === 'Completed' ? 'text-emerald-500' : 'text-red-400'}`}>
-                          {h.status === 'Completed' ? `+₱${h.amount}` : h.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
         </div>
       </main>
 
@@ -1316,26 +1020,89 @@ const App = () => {
             <div className={`p-6 ${modalType === 'walkin' ? 'bg-[#F8BC9B]' : 'bg-[#75BDE0]'} text-[#0f172a]`}>
               <div className="flex justify-between items-center mb-1">
                 <h3 className="text-2xl font-black">
-                  {modalType === 'walkin' ? 'Walk-In Session' : modalType === 'reserve' ? 'New Reservation' : modalType === 'waitlist' ? 'Join Waitlist' : 'Edit Table'}
+                  {modalType === 'walkin' ? 'Walk-In Session' : modalType === 'reserve' ? 'New Reservation' : modalType === 'waitlist' ? 'Join Waitlist' : modalType === 'assign' ? 'Assign Table' : 'Edit Table'}
                 </h3>
                 <button onClick={closeModal} className="p-1 bg-black/10 rounded-full hover:bg-black/20"><X className="w-5 h-5"/></button>
               </div>
-              <p className="font-medium opacity-80">{modalType === 'waitlist' ? 'Add guest to queue' : selectedTable?.name}</p>
+              <p className="font-medium opacity-80">{modalType === 'waitlist' ? 'Add guest to queue' : modalType === 'assign' ? `Guest: ${formData.guestName}` : selectedTable?.name}</p>
             </div>
             
             <div className="p-6 space-y-5">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">
-                  {modalType === 'edit' ? 'New Name' : 'Guest Name'}
-                </label>
-                <input 
-                  autoFocus
-                  type="text" 
-                  value={formData.guestName}
-                  onChange={(e) => setFormData({...formData, guestName: e.target.value})}
-                  className="w-full p-3 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-[#0f172a] focus:border-[#75BDE0] outline-none"
-                />
-              </div>
+              
+              {modalType === 'assign' && (() => {
+                const res = reservations.find(r => r.id === startingReservationId);
+                const preference = res?.tableName || 'Any Table';
+                
+                return (
+                <div className="space-y-4">
+                  <p className="text-sm text-slate-500">
+                    Assign <strong>{formData.guestName}</strong> to a table.
+                    {preference !== 'Any Table' && <span className="block text-xs text-[#F8D49B] font-bold mt-1">Prefers: {preference}</span>}
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {tables.filter(t => t.status === 'Available').length === 0 ? (
+                      <p className="col-span-2 text-center text-red-400 font-bold py-4">No tables available.</p>
+                    ) : (
+                      tables.filter(t => t.status === 'Available').map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => {
+                            setSelectedTable(t);
+                            setModalType('walkin');
+                            setFormData(prev => ({
+                              ...prev,
+                              date: new Date().toISOString().split('T')[0],
+                              time: '',
+                              duration: 1,
+                              isOpenTime: true
+                            }));
+                          }}
+                          className="p-4 rounded-xl border-2 border-slate-100 hover:border-[#75BDE0] hover:bg-[#75BDE0]/10 transition-all font-bold text-[#0f172a]"
+                        >
+                          {t.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+                );
+              })()}
+
+              {modalType !== 'assign' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">
+                    {modalType === 'edit' ? 'New Name' : 'Guest Name'}
+                  </label>
+                  <input 
+                    autoFocus
+                    type="text" 
+                    value={formData.guestName}
+                    onChange={(e) => setFormData({...formData, guestName: e.target.value})}
+                    className="w-full p-3 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-[#0f172a] focus:border-[#75BDE0] outline-none"
+                  />
+                </div>
+              )}
+
+              {modalType === 'waitlist' && (
+                <div>
+                   <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Preferred Table</label>
+                   <div className="relative">
+                     <select 
+                       value={formData.preferredTable}
+                       onChange={(e) => setFormData({...formData, preferredTable: e.target.value})}
+                       className="w-full p-3 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-[#0f172a] focus:border-[#75BDE0] outline-none appearance-none"
+                     >
+                       <option value="Any Table">Any Table</option>
+                       {tables.map(t => (
+                         <option key={t.id} value={t.name}>{t.name}</option>
+                       ))}
+                     </select>
+                     <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                       <ArrowLeft className="w-4 h-4 -rotate-90" />
+                     </div>
+                   </div>
+                </div>
+              )}
 
               {modalType === 'reserve' && (
                 <div className="grid grid-cols-2 gap-4">
@@ -1360,6 +1127,11 @@ const App = () => {
                   <div className="col-span-2 p-3 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold flex justify-between">
                     <span>Reservation Fee:</span>
                     <span>₱{RESERVATION_FEE}</span>
+                  </div>
+                  {/* Reservation Note */}
+                  <div className="col-span-2 mt-2 p-3 bg-blue-50 text-blue-600 rounded-xl text-xs font-medium flex items-start gap-2">
+                    <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <p>Note: There will be at least a 5-minute table preparation time before your session starts.</p>
                   </div>
                 </div>
               )}
@@ -1425,17 +1197,19 @@ const App = () => {
                 </div>
               )}
 
-              <div className="flex gap-3 pt-2">
-                <button onClick={closeModal} className="flex-1 py-3 rounded-xl font-bold text-slate-400 hover:bg-slate-50 transition-colors">Cancel</button>
-                <button 
-                  onClick={handleConfirm}
-                  className={`flex-1 py-3 rounded-xl font-bold text-white shadow-lg transition-transform active:scale-95 ${
-                    modalType === 'walkin' ? 'bg-[#F8BC9B] hover:bg-[#e6ab8c]' : 'bg-[#75BDE0] hover:bg-[#64a9cc]'
-                  }`}
-                >
-                  Confirm
-                </button>
-              </div>
+              {modalType !== 'assign' && (
+                <div className="flex gap-3 pt-2">
+                  <button onClick={closeModal} className="flex-1 py-3 rounded-xl font-bold text-slate-400 hover:bg-slate-50 transition-colors">Cancel</button>
+                  <button 
+                    onClick={handleConfirm}
+                    className={`flex-1 py-3 rounded-xl font-bold text-white shadow-lg transition-transform active:scale-95 ${
+                      modalType === 'walkin' ? 'bg-[#F8BC9B] hover:bg-[#e6ab8c]' : 'bg-[#75BDE0] hover:bg-[#64a9cc]'
+                    }`}
+                  >
+                    Confirm
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
