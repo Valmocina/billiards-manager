@@ -135,26 +135,36 @@ const App = () => {
     reservations.filter(r => r.type === 'Reservation'), 
   [reservations]);
 
-  // --- NEW PRICING LOGIC ---
+  // --- NEW RECURRING PRICING LOGIC ---
   const calculateBill = (minutes) => {
-    // Round up to nearest whole minute
-    const m = Math.ceil(minutes);
+    const totalMinutes = Math.ceil(minutes);
 
-    if (m <= 5) return 15;
-    if (m <= 10) return 20;
-    if (m <= 15) return 25;
-    if (m <= 20) return 30;
-    if (m <= 25) return 40;
-    if (m <= 30) return 50;
-    if (m <= 35) return 60;
-    if (m <= 40) return 70;
-    if (m <= 45) return 75;
-    if (m <= 50) return 80;
-    if (m <= 55) return 90;
-    if (m <= 60) return 100;
+    // 1. Count how many full hours have passed
+    const hours = Math.floor(totalMinutes / 60);
 
-    // Over 1 hour: Pro-rate based on hourly rate
-    return Math.ceil((minutes / 60) * hourlyRate);
+    // 2. Get the remaining minutes (e.g., if 65 mins, remainder is 5)
+    const remainingMinutes = totalMinutes % 60;
+
+    // 3. Helper to get price for the 0-60 minute range
+    const getTierPrice = (m) => {
+      if (m === 0) return 0; // Exactly on the hour mark
+      if (m <= 5) return 15;
+      if (m <= 10) return 20;
+      if (m <= 15) return 25;
+      if (m <= 20) return 30;
+      if (m <= 25) return 40;
+      if (m <= 30) return 50;
+      if (m <= 35) return 60;
+      if (m <= 40) return 70;
+      if (m <= 45) return 75;
+      if (m <= 50) return 80;
+      if (m <= 55) return 90;
+      return 100; // 56-60 minutes
+    };
+
+    // 4. Calculate Total: (Hours * HourlyRate) + (Tier Price of remainder)
+    // Example: 65 mins = (1 * 100) + 15 = 115
+    return (hours * hourlyRate) + getTierPrice(remainingMinutes);
   };
 
   // --- TOTAL EARNINGS & TIME CALCULATION ---
