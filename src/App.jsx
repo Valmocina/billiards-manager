@@ -25,15 +25,15 @@ const App = () => {
   const [tables, setTables] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [history, setHistory] = useState([]); 
-  const [hourlyRate, setHourlyRate] = useState(100); // Default updated to 100 based on new rates
-  
+  const [hourlyRate, setHourlyRate] = useState(100); 
+   
   const [currentView, setCurrentView] = useState('dashboard'); 
   const [darkMode, setDarkMode] = useState(true);
-  
+   
   // Track reservation start details
   const [startingReservationId, setStartingReservationId] = useState(null); 
   const [startingReservationType, setStartingReservationType] = useState(null);
-  
+   
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [now, setNow] = useState(new Date()); 
 
@@ -93,6 +93,8 @@ const App = () => {
             ...h,
             tableName: h.table_name,
             guestName: h.guest_name,
+            // Ensure duration_minutes is handled if null
+            durationMinutes: h.duration_minutes || 0 
         }));
         setHistory(formattedHist);
     }
@@ -135,7 +137,7 @@ const App = () => {
 
   // --- NEW PRICING LOGIC ---
   const calculateBill = (minutes) => {
-    // Round up to nearest whole minute to avoid float issues
+    // Round up to nearest whole minute
     const m = Math.ceil(minutes);
 
     if (m <= 5) return 15;
@@ -151,9 +153,29 @@ const App = () => {
     if (m <= 55) return 90;
     if (m <= 60) return 100;
 
-    // Over 1 hour: Pro-rate based on hourly rate (Default 100)
+    // Over 1 hour: Pro-rate based on hourly rate
     return Math.ceil((minutes / 60) * hourlyRate);
   };
+
+  // --- TOTAL EARNINGS & TIME CALCULATION ---
+  const totalEarnings = useMemo(() => {
+    return history.reduce((sum, item) => item.status === 'Completed' ? sum + item.amount : sum, 0);
+  }, [history]);
+
+  const totalDurationPlayed = useMemo(() => {
+    const totalMinutes = history.reduce((sum, item) => {
+      // Only count completed sessions that have duration data
+      if (item.status === 'Completed' && item.duration_minutes) {
+        return sum + item.duration_minutes;
+      }
+      return sum;
+    }, 0);
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    
+    return `${hours}h ${minutes}m`;
+  }, [history]);
 
   // --- ACTIONS ---
   const handleLogin = (e) => {
@@ -257,7 +279,8 @@ const App = () => {
     setStartingReservationType(null);
   };
 
-  const addToHistory = async (item, status, amount = 0) => {
+  // --- UPDATED ADD TO HISTORY ---
+  const addToHistory = async (item, status, amount = 0, duration = 0) => {
     const newEntry = {
       table_name: item.tableName || item.name,
       guest_name: item.guestName || item.currentGuest || 'Walk-In',
@@ -265,7 +288,8 @@ const App = () => {
       time: new Date().toLocaleTimeString(),
       type: item.type || 'Session',
       status: status, 
-      amount: amount
+      amount: amount,
+      duration_minutes: Math.round(duration) // Save duration to DB
     };
     await supabase.from('history').insert([newEntry]);
     fetchAllData(); 
@@ -328,16 +352,21 @@ const App = () => {
     setShowModal(true);
   };
 
+  // --- UPDATED FINISH SESSION ---
   const handleFinishSession = async (table) => {
     let cost = 0;
+    let finalDurationMinutes = 0; // Track duration
     
     if (table.sessionType === 'walkin') {
        if (table.startTime) {
+         // Open Time Logic: Calculate exact minutes
          const nowTime = new Date();
          const diffMs = nowTime - table.startTime;
-         const diffMinutes = diffMs / (1000 * 60); 
-         cost = calculateBill(diffMinutes);
+         finalDurationMinutes = diffMs / (1000 * 60); 
+         cost = calculateBill(finalDurationMinutes);
        } else {
+         // Fixed Duration Logic
+         finalDurationMinutes = (table.duration || 1) * 60;
          cost = (table.duration || 1) * hourlyRate;
        }
     }
@@ -360,14 +389,20 @@ const App = () => {
         start_time: null 
     }).eq('id', table.id);
 
-    await addToHistory({ tableName: table.name, type: 'Walk-In', guestName: table.currentGuest }, 'Completed', cost);
+    // Pass finalDurationMinutes to history
+    await addToHistory(
+        { tableName: table.name, type: 'Walk-In', guestName: table.currentGuest }, 
+        'Completed', 
+        cost, 
+        finalDurationMinutes
+    );
     fetchAllData(); 
   };
 
   const handleCancelReservation = async (id, type) => {
     const res = reservations.find(r => r.id === id);
     if (res) {
-      await addToHistory({ ...res, type: type }, 'Canceled', 0);
+      await addToHistory({ ...res, type: type }, 'Canceled', 0, 0);
       await supabase.from('reservations').delete().eq('id', id);
       fetchAllData();
     }
@@ -493,7 +528,7 @@ const App = () => {
       };
       
       await supabase.from('reservations').insert([newWaitlist]);
-      await addToHistory(newWaitlist, 'Joined Waitlist', 0);
+      await addToHistory(newWaitlist, 'Joined Waitlist', 0, 0);
       closeModal();
       fetchAllData();
     }
@@ -514,7 +549,7 @@ const App = () => {
         };
         
         await supabase.from('reservations').insert([newReservation]);
-        await addToHistory(newReservation, 'Scheduled Reservation', RESERVATION_FEE);
+        await addToHistory(newReservation, 'Scheduled Reservation', RESERVATION_FEE, 0);
         closeModal();
         fetchAllData();
     }
@@ -528,10 +563,6 @@ const App = () => {
     setStartingReservationId(null);
     setStartingReservationType(null);
   };
-
-  const totalEarnings = useMemo(() => {
-    return history.reduce((sum, item) => item.status === 'Completed' ? sum + item.amount : sum, 0);
-  }, [history]);
 
   const theme = {
     bg: darkMode ? 'bg-[#0f172a]' : 'bg-[#f8fafc]',
@@ -756,9 +787,9 @@ const App = () => {
                   <div className={`${theme.card} rounded-3xl p-4 border min-h-[200px]`}>
                     {waitlistItems.length === 0 ? (
                       <div className="h-full flex flex-col items-center justify-center text-center py-8">
-                         <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${darkMode ? 'bg-[#334155]' : 'bg-slate-100'}`}>
-                          <List className={`w-6 h-6 ${theme.textMuted}`} />
-                        </div>
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${darkMode ? 'bg-[#334155]' : 'bg-slate-100'}`}>
+                           <List className={`w-6 h-6 ${theme.textMuted}`} />
+                         </div>
                         <p className={`text-sm ${theme.textMuted}`}>No active waitlist.</p>
                       </div>
                     ) : (
@@ -801,9 +832,9 @@ const App = () => {
                   <div className={`${theme.card} rounded-3xl p-4 border min-h-[200px]`}>
                     {reservationItems.length === 0 ? (
                       <div className="h-full flex flex-col items-center justify-center text-center py-8">
-                         <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${darkMode ? 'bg-[#334155]' : 'bg-slate-100'}`}>
-                          <CalendarDays className={`w-6 h-6 ${theme.textMuted}`} />
-                        </div>
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${darkMode ? 'bg-[#334155]' : 'bg-slate-100'}`}>
+                           <CalendarDays className={`w-6 h-6 ${theme.textMuted}`} />
+                         </div>
                         <p className={`text-sm ${theme.textMuted}`}>No future bookings.</p>
                       </div>
                     ) : (
@@ -839,7 +870,6 @@ const App = () => {
             </div>
           )}
           
-          {/* ... (Existing Login, Earnings, Management, Settings Views remain unchanged) ... */}
           {currentView === 'login' && (
             <div className="flex items-center justify-center h-full">
               <div className={`w-full max-w-md p-8 rounded-3xl shadow-2xl border ${theme.card} animate-in fade-in zoom-in-95`}>
@@ -892,7 +922,8 @@ const App = () => {
 
           {currentView === 'earnings' && isAuthenticated && (
             <div className="max-w-7xl mx-auto space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 print:hidden">
+              {/* UPDATED GRID TO 4 COLUMNS */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 print:hidden">
                 <div className={`${theme.card} p-6 rounded-3xl border flex items-center gap-4`}>
                   <div className="w-16 h-16 rounded-full bg-[#75BDE0]/20 flex items-center justify-center">
                     <DollarSign className="w-8 h-8 text-[#75BDE0]" />
@@ -902,7 +933,7 @@ const App = () => {
                     <h3 className={`text-3xl font-bold ${theme.text}`}>₱{totalEarnings.toLocaleString()}</h3>
                   </div>
                 </div>
-                {/* ... (Existing Earnings stats) */}
+                
                 <div className={`${theme.card} p-6 rounded-3xl border flex items-center gap-4`}>
                   <div className="w-16 h-16 rounded-full bg-[#F8BC9B]/20 flex items-center justify-center">
                     <CheckCircle className="w-8 h-8 text-[#F8BC9B]" />
@@ -912,6 +943,18 @@ const App = () => {
                     <h3 className={`text-3xl font-bold ${theme.text}`}>{history.filter(h => h.status === 'Completed').length}</h3>
                   </div>
                 </div>
+
+                {/* NEW CARD: TOTAL TIME PLAYED */}
+                <div className={`${theme.card} p-6 rounded-3xl border flex items-center gap-4`}>
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                    <History className="w-8 h-8 text-emerald-500" />
+                  </div>
+                  <div>
+                    <p className={theme.textMuted}>Total Hours Played</p>
+                    <h3 className={`text-3xl font-bold ${theme.text}`}>{totalDurationPlayed}</h3>
+                  </div>
+                </div>
+
                 <div className={`${theme.card} p-6 rounded-3xl border flex items-center gap-4`}>
                     <div className="w-16 h-16 rounded-full bg-[#F89B9B]/20 flex items-center justify-center">
                     <Users className="w-8 h-8 text-[#F89B9B]" />
@@ -1170,18 +1213,18 @@ const App = () => {
               {/* SHARED: PREFERRED TABLE FOR WAITLIST & RESERVE */}
               {(modalType === 'waitlist' || modalType === 'reserve') && (
                   <div>
-                     <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Preferred Table</label>
-                     <select 
+                      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Preferred Table</label>
+                      <select 
                         value={formData.preferredTable}
                         onChange={(e) => setFormData({...formData, preferredTable: e.target.value})}
                         className="w-full p-3 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-[#0f172a] focus:border-[#75BDE0] outline-none"
-                     >
+                      >
                         <option value="Any Table">Any Table</option>
                         {tables.map(t => (
                             <option key={t.id} value={t.name}>{t.name}</option>
                         ))}
-                     </select>
-                     <p className="text-[10px] text-red-500 font-bold mt-1 italic">* Note: Table preparation may take 5 minutes.</p>
+                      </select>
+                      <p className="text-[10px] text-red-500 font-bold mt-1 italic">* Note: Table preparation may take 5 minutes.</p>
                   </div>
               )}
 
