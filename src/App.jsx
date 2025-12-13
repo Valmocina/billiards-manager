@@ -26,14 +26,14 @@ const App = () => {
   const [reservations, setReservations] = useState([]);
   const [history, setHistory] = useState([]); 
   const [hourlyRate, setHourlyRate] = useState(100); 
-   
+    
   const [currentView, setCurrentView] = useState('dashboard'); 
   const [darkMode, setDarkMode] = useState(true);
-   
+    
   // Track reservation start details
   const [startingReservationId, setStartingReservationId] = useState(null); 
   const [startingReservationType, setStartingReservationType] = useState(null);
-   
+    
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [now, setNow] = useState(new Date()); 
 
@@ -135,7 +135,7 @@ const App = () => {
     reservations.filter(r => r.type === 'Reservation'), 
   [reservations]);
 
-  // --- NEW RECURRING PRICING LOGIC ---
+  // --- UPDATED PRICING LOGIC (RECURRING AFTER 1 HOUR) ---
   const calculateBill = (minutes) => {
     const totalMinutes = Math.ceil(minutes);
 
@@ -163,7 +163,6 @@ const App = () => {
     };
 
     // 4. Calculate Total: (Hours * HourlyRate) + (Tier Price of remainder)
-    // Example: 65 mins = (1 * 100) + 15 = 115
     return (hours * hourlyRate) + getTierPrice(remainingMinutes);
   };
 
@@ -183,7 +182,7 @@ const App = () => {
 
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
-    
+     
     return `${hours}h ${minutes}m`;
   }, [history]);
 
@@ -219,7 +218,7 @@ const App = () => {
       setPasswordMsg({ text: 'New passwords do not match.', type: 'error' });
       return;
     }
-    
+     
     const { error } = await supabase
       .from('app_settings')
       .upsert({ key: 'admin_password', value: passwordForm.new })
@@ -337,7 +336,7 @@ const App = () => {
     if (res.tableName && res.tableName !== 'Any Table') {
         tableToSelect = tables.find(t => t.name === res.tableName);
     }
-    
+     
     if (!tableToSelect) {
         tableToSelect = tables.find(t => t.status === 'Available');
     }
@@ -366,7 +365,7 @@ const App = () => {
   const handleFinishSession = async (table) => {
     let cost = 0;
     let finalDurationMinutes = 0; // Track duration
-    
+     
     if (table.sessionType === 'walkin') {
        if (table.startTime) {
          // Open Time Logic: Calculate exact minutes
@@ -377,14 +376,14 @@ const App = () => {
        } else {
          // Fixed Duration Logic
          finalDurationMinutes = (table.duration || 1) * 60;
-         cost = (table.duration || 1) * hourlyRate;
+         cost = calculateBill(finalDurationMinutes);
        }
     }
 
     if (table.deductible) {
       cost = Math.max(0, cost - table.deductible);
     }
-    
+     
     cost = Math.round(cost);
 
     await supabase.from('tables').update({
@@ -453,6 +452,17 @@ const App = () => {
       return `${hours}:${minutes}:${seconds}`;
   };
 
+  // --- NEW HELPER: FORMAT HISTORY DURATION ---
+  const formatHistoryDuration = (totalMinutes) => {
+    if (!totalMinutes || totalMinutes === 0) return '-';
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = Math.round(totalMinutes % 60);
+    
+    if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h`;
+    return `${minutes}m`;
+  };
+
   const convertTo12Hour = (time24) => {
     if (!time24) return '';
     const [hours, minutes] = time24.split(':');
@@ -465,7 +475,7 @@ const App = () => {
 
   const handleConfirm = async () => {
     setError('');
-    
+     
     if (modalType === 'edit') {
       if (!formData.guestName.trim()) return;
       await supabase.from('tables').update({ name: formData.guestName }).eq('id', selectedTable.id);
@@ -478,7 +488,7 @@ const App = () => {
       setError('Please enter a name');
       return;
     }
-    
+     
     // --- WALKIN / START SESSION LOGIC ---
     if (modalType === 'walkin') {
       if (!selectedTable) { setError("Please select a table."); return; }
@@ -518,7 +528,7 @@ const App = () => {
       closeModal();
       fetchAllData();
     } 
-    
+     
     // --- WAITLIST LOGIC (Immediate Queue) ---
     else if (modalType === 'waitlist') {
       if (waitlistItems.length >= WAITLIST_LIMIT) {
@@ -799,7 +809,7 @@ const App = () => {
                       <div className="h-full flex flex-col items-center justify-center text-center py-8">
                           <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${darkMode ? 'bg-[#334155]' : 'bg-slate-100'}`}>
                            <List className={`w-6 h-6 ${theme.textMuted}`} />
-                         </div>
+                          </div>
                         <p className={`text-sm ${theme.textMuted}`}>No active waitlist.</p>
                       </div>
                     ) : (
@@ -844,7 +854,7 @@ const App = () => {
                       <div className="h-full flex flex-col items-center justify-center text-center py-8">
                           <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${darkMode ? 'bg-[#334155]' : 'bg-slate-100'}`}>
                            <CalendarDays className={`w-6 h-6 ${theme.textMuted}`} />
-                         </div>
+                          </div>
                         <p className={`text-sm ${theme.textMuted}`}>No future bookings.</p>
                       </div>
                     ) : (
@@ -999,19 +1009,21 @@ const App = () => {
                 </div>
 
                 <div className="overflow-x-auto">
+                  {/* UPDATED TABLE WITH DURATION COLUMN */}
                   <table className="w-full text-left">
                     <thead className={`${theme.tableHeader} border-b ${darkMode ? 'border-[#334155]' : 'border-slate-200'}`}>
                       <tr>
                         <th className="pb-4 pl-4">Type</th>
                         <th className="pb-4">Guest</th>
                         <th className="pb-4">Details</th>
+                        <th className="pb-4">Duration</th>
                         <th className="pb-4">Status</th>
                         <th className="pb-4 pr-4 text-right">Amount</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-700/20">
                       {history.length === 0 ? (
-                        <tr><td colSpan="5" className={`py-8 text-center ${theme.textMuted}`}>No transaction history yet.</td></tr>
+                        <tr><td colSpan="6" className={`py-8 text-center ${theme.textMuted}`}>No transaction history yet.</td></tr>
                       ) : history.map((item) => (
                         <tr key={item.id} className="hover:bg-slate-500/5">
                           <td className="py-4 pl-4">
@@ -1021,6 +1033,12 @@ const App = () => {
                           </td>
                           <td className={`py-4 ${theme.text}`}>{item.guestName}</td>
                           <td className={`py-4 ${theme.textMuted}`}>{item.tableName} • {item.date}</td>
+                          
+                          {/* NEW DURATION CELL */}
+                          <td className={`py-4 font-medium ${theme.text}`}>
+                            {formatHistoryDuration(item.durationMinutes)}
+                          </td>
+
                           <td className="py-4">
                             <span className={`text-xs font-bold ${
                               item.status === 'Completed' ? 'text-emerald-400' : 
@@ -1109,7 +1127,7 @@ const App = () => {
                   <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme.text}`}>
                     <Key className="w-5 h-5 text-[#F8BC9B]" /> Change Password
                   </h4>
-                   <div className="space-y-4 max-w-md">
+                    <div className="space-y-4 max-w-md">
                     <input 
                       type="password"
                       placeholder="Current Password" 
@@ -1144,7 +1162,7 @@ const App = () => {
                     </button>
                   </div>
                 </div>
-                 
+                  
                  <div className={`p-6 rounded-2xl border ${theme.subCard}`}>
                   <h4 className={`text-lg font-bold mb-4 flex items-center gap-2 ${theme.text}`}>
                     <Monitor className="w-5 h-5 text-[#F8BC9B]" /> Appearance
@@ -1289,7 +1307,7 @@ const App = () => {
 
                   <div className="mt-4 p-3 bg-orange-50 text-orange-600 rounded-xl text-xs font-bold">
                     <div className="flex justify-between items-center mb-1">
-                         <span>Pricing Rates:</span>
+                        <span>Pricing Rates:</span>
                     </div>
                     <div className="flex justify-between opacity-80 text-[10px] space-x-1">
                          <span>5m:₱15</span>
